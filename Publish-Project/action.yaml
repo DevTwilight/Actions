@@ -1,0 +1,37 @@
+name: 'Publish-Project'
+description: 'Publish project to itch.io'
+inputs:
+  Channel:
+    required: true
+  Project_path:
+    required: true
+  user:
+    required: true
+  game:
+    required: true
+  api_key:
+    required: true
+runs:
+  using: 'composite'
+  shell: 'pwsh'
+  steps:
+    - name: Set up Butler
+      run: |
+        Write-Host "Setting up Butler"
+        New-Item -ItemType Directory -Force -Path "butler"
+        curl -L -o "butler/butler.zip" https://broth.itch.ovh/butler/windows-amd64/LATEST/archive/default
+        Expand-Archive -Path "butler/butler.zip" -DestinationPath "butler"
+        Remove-Item "butler/butler.zip" -Force
+        .\butler\butler -V
+
+    - name: Publish
+      env:
+        BUTLER_API_KEY: ${{ inputs.api_key }}
+      run: |
+        Write-Host "Initiating publishing process..."
+        New-Item -ItemType Directory -Force -Path "upload"
+        Move-Item -Path "${{ inputs.Project_path }}" -Destination "upload"
+        .\butler\butler push "upload" "${{ inputs.user }}/${{ inputs.game }}:${{ inputs.Channel}}"
+        Remove-Item -Recurse -Force "upload"
+        Remove-Item -Recurse -Force "butler"
+        Write-Host "Project published successfully"
