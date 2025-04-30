@@ -1,0 +1,56 @@
+name: 'Zip-Project'
+description: 'Creates a ZIP archive'
+
+inputs:
+  include:
+    required: true
+    description: 'Paths to include in the ZIP archive'
+  exclude:
+    required: false
+    description: 'Paths to exclude from the ZIP archive'
+  zip-name:
+    required: true
+    description: 'Name of the output ZIP file'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Zip-Project
+      shell: pwsh
+      run: |
+        $IncludePaths = "${{ inputs.include }}" -split "`n"
+        $ExcludePaths = "${{ inputs.exclude }}" -split "`n"
+        $ZipName = "${{ inputs.zip-name }}"
+
+        $WorkingDirectory = (Get-Location).Path
+        $ZipFullPath = Join-Path $WorkingDirectory $ZipName
+
+        $TempDir = "zip-staging"
+
+        Write-Host "Initiating ZIP creation process..."
+
+        New-Item -Path $TempDir -ItemType Directory | Out-Null
+
+        foreach ($Path in $IncludePaths) {
+            $TrimmedPath = $Path.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($TrimmedPath) -and (Test-Path $TrimmedPath)) {
+                $Destination = Join-Path $TempDir (Split-Path $TrimmedPath -Leaf)
+                Copy-Item -Path $TrimmedPath -Destination $Destination -Recurse
+            }
+        }
+
+        foreach ($Path in $ExcludePaths) {
+            $TrimmedPath = $Path.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($TrimmedPath)) {
+                $RelativeExcludePath = Join-Path $TempDir $TrimmedPath
+                if (Test-Path $RelativeExcludePath) {
+                    Remove-Item -Recurse -Force $RelativeExcludePath
+                }
+            }
+        }
+
+        Compress-Archive -Path "$TempDir\*" -DestinationPath $ZipFullPath -Force
+
+        Remove-Item -Recurse -Force $TempDir
+
+        Write-Host "ZIP file created successfully at '$ZipFullPath'."
