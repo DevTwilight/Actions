@@ -1,5 +1,6 @@
 name: 'Publish-Project'
 description: 'Publish project to itch.io'
+
 inputs:
   Channel:
     required: true
@@ -11,11 +12,12 @@ inputs:
     required: true
   api_key:
     required: true
+
 runs:
   using: 'composite'
-  shell: 'pwsh'
   steps:
     - name: Set up Butler
+      shell: pwsh
       run: |
         Write-Host "Setting up Butler"
         New-Item -ItemType Directory -Force -Path "butler"
@@ -25,6 +27,7 @@ runs:
         .\butler\butler -V
 
     - name: Publish
+      shell: pwsh
       env:
         BUTLER_API_KEY: ${{ inputs.api_key }}
       run: |
