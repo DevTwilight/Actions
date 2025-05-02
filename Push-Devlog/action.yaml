@@ -1,46 +1,41 @@
 name: Push-Devlog
 
-description: |
-  Composite GitHub Action that generates release notes from commit messages
-  and writes them to a markdown file based on version bump commits.
-
 inputs:
-  prefix:
-    description: |
-      List of commit message prefixes to include (one per line), e.g., update, publish.
+  keywords:
     required: true
 
   section:
-    description: |
-      Optional mapping of prefix to section heading. Format: prefix:Section Heading
     required: false
 
   file:
-    description: |
-      Name of the output markdown file (e.g., Devlog.md).
     required: true
 
 outputs:
   version:
-    description: "Extracted version number from the latest version bump commit."
 
 runs:
   using: "composite"
   steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
     - name: Generate Devlog
       shell: pwsh
       run: |
-        Write-Host "[INFO] Starting Devlog generation..."
+        Write-Host "Starting Devlog generation..."
 
-        $prefixInput = "${{ inputs.prefix }}"
+        $keywordsInput = "${{ inputs.keywords }}"
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
 
-        $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        $keywords = $keywordsInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
         $sectionMap = @{}
 
         if ($sectionInput -ne "") {
-            Write-Host "[INFO] Creating sections..."
+            Write-Host "Creating custom sections..."
             foreach ($line in $sectionInput -split "`n") {
                 if ($line -match "^(.*?):(.*)$") {
                     $sectionMap[$matches[1].Trim()] = $matches[2].Trim()
@@ -48,20 +43,20 @@ runs:
             }
         }
 
-        Write-Host "[INFO] Fetching commit history..."
+        Write-Host "Fetching commit history..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Host "[INFO] Detecting version bump commits..."
+        Write-Host "Detecting version bump commits..."
         $versionBumps = $commits | Where-Object {
             $_.Message -match '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
         }
 
         if ($versionBumps.Count -eq 0) {
-            Write-Warning "[WARNING] No version bump commit found. Cannot generate Devlog."
+            Write-Warning "No version bump commit found. Cannot generate Devlog."
             exit 1
         }
 
@@ -69,8 +64,8 @@ runs:
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
         $version = $versionMatch.Value
 
-        Write-Host "[INFO] Extracted version: $version"
-
+        Write-Host "Version extracted."
+        
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
             $commits.IndexOf($versionBumps[1])
@@ -82,11 +77,11 @@ runs:
         $sections = @{}
 
         foreach ($commit in $rangeCommits) {
-            foreach ($prefix in $prefixes) {
-                $pattern = "^$prefix\s*:\s*(.+)$"
+            foreach ($keyword in $keywords) {
+                $pattern = "^$keyword\s*:\s*(.+)$"
                 if ($commit.Message -match $pattern) {
                     $clean = $matches[1].Trim()
-                    $heading = if ($sectionMap.ContainsKey($prefix)) { $sectionMap[$prefix] } else { $prefix }
+                    $heading = if ($sectionMap.ContainsKey($keyword)) { $sectionMap[$keyword] } else { $keyword }
                     if (-not $sections.ContainsKey($heading)) {
                         $sections[$heading] = @()
                     }
@@ -96,13 +91,11 @@ runs:
             }
         }
 
-        Write-Host "[INFO] Creating Devlog file: $fileName"
+        Write-Host "Creating Devlog file: $fileName"
         $lines = @()
-        $lines += "# Devlog - Version $version"
-        $lines += ""
-
+        
         if ($sections.Count -eq 0) {
-            Write-Warning "[WARNING] No qualifying commits found for this version."
+            Write-Warning "No qualifying commits found for this version."
         } else {
             foreach ($heading in $sections.Keys) {
                 $lines += "## $heading"
@@ -112,4 +105,4 @@ runs:
         }
 
         $lines | Set-Content -Path $fileName -Encoding UTF8
-        Write-Host "[INFO] Devlog file created successfully: $fileName"
+        Write-Host "Devlog file created successfully: $fileName"
