@@ -1,7 +1,8 @@
 name: Push-Devlog
 
 description: |
-  Composite GitHub Action that generates release notes from commit messages and writes to a custom file.
+  Composite GitHub Action that generates release notes from commit messages
+  and writes them to a custom markdown file based on version bump commits.
 
 inputs:
   prefix:
@@ -26,7 +27,7 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Generate release notes and write to file
+    - name: "Generate release notes and write to file"
       id: generate
       shell: pwsh
       run: |
@@ -48,48 +49,40 @@ runs:
             }
         }
 
-        Write-Host "[INFO] Extracting commit log..."
-        $log = git log --date-order --pretty=format:"%H|%s"
+        Write-Host "[INFO] Extracting commit history..."
+        $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Host "[INFO] Searching for version bump commits..."
+        Write-Host "[INFO] Checking for version bumps..."
         $versionBumps = $commits | Where-Object { $_.Message -match '^Bump version to \d+\.\d+\.\d+(-dev)?$' }
 
-        if ($versionBumps.Count -lt 1) {
-            Write-Host "[INFO] No previous version bump found. Creating first Devlog."
-            $version = "0.1.0-dev"
-            echo "::set-output name=version::$version"
-            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_No previous version bump found. First devlog created._"
-            exit 0
+        if ($versionBumps.Count -eq 0) {
+            Write-Host "[ERROR] No version bump commit found. Cannot generate Devlog."
+            exit 1
         }
 
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+\.\d+(-dev)?')
-        $version = if ($versionMatch.Success) { $versionMatch.Value } else { "unknown" }
-
+        $version = $versionMatch.Value
         echo "::set-output name=version::$version"
         Write-Host "[INFO] Found version bump: $version"
 
-        if ($versionBumps.Count -lt 2) {
-            Write-Host "[INFO] This is the first version bump. Writing single version Devlog."
-            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_Initial release notes._"
-            exit 0
+        $startIndex = $commits.IndexOf($currentBump)
+        $endIndex = -1
+
+        if ($versionBumps.Count -ge 2) {
+            $endIndex = $commits.IndexOf($versionBumps[1])
         }
 
-        $previousBump = $versionBumps[1]
-
-        $startIndex = ($commits | Select-Object -Index 0..($commits.Count - 1) | Where-Object { $_.Hash -eq $currentBump.Hash }).Index
-        $endIndex = ($commits | Select-Object -Index 0..($commits.Count - 1) | Where-Object { $_.Hash -eq $previousBump.Hash }).Index
-
-        if ($startIndex -eq $null -or $endIndex -eq $null -or $startIndex -le $endIndex) {
-            Write-Host "[ERROR] Invalid commit range for release notes."
-            exit 1
+        $rangeCommits = if ($endIndex -ge 0) {
+            $commits[$endIndex + 1 .. ($startIndex - 1)]
+        } else {
+            $commits[0 .. ($startIndex - 1)]
         }
 
-        $rangeCommits = $commits[$endIndex + 1 .. ($startIndex - 1)]
         $sections = @{}
 
         foreach ($commit in $rangeCommits) {
@@ -106,16 +99,20 @@ runs:
             }
         }
 
-        Write-Host "[INFO] Writing Devlog to file: $fileName"
+        Write-Host "[INFO] Creating Devlog file: $fileName"
         $lines = @()
         $lines += "# Devlog - Version $version"
         $lines += ""
 
-        foreach ($heading in $sections.Keys) {
-            $lines += "## $heading"
-            $lines += $sections[$heading]
-            $lines += ""
+        if ($sections.Count -eq 0) {
+            $lines += "_No qualifying commits found for this version._"
+        } else {
+            foreach ($heading in $sections.Keys) {
+                $lines += "## $heading"
+                $lines += $sections[$heading]
+                $lines += ""
+            }
         }
 
         $lines | Set-Content -Path $fileName -Encoding UTF8
-        Write-Host "[INFO] Devlog created successfully: $fileName"
+        Write-Host "[INFO] Devlog file created successfully: $fileName"
