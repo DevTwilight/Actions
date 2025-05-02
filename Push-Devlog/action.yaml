@@ -3,15 +3,14 @@ name: Push-Devlog
 inputs:
   keywords:
     required: true
-
   section:
     required: false
-
   file:
     required: true
 
 outputs:
   version:
+    value: ${{ steps.set-version.outputs.version }}
 
 runs:
   using: "composite"
@@ -19,14 +18,12 @@ runs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
 
     - name: Generate Devlog
+      id: set-version
       shell: pwsh
       run: |
-        Write-Host "Starting Devlog generation..."
-
         $keywordsInput = "${{ inputs.keywords }}"
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
@@ -65,7 +62,9 @@ runs:
         $version = $versionMatch.Value
 
         Write-Host "Version extracted."
-        
+
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
             $commits.IndexOf($versionBumps[1])
