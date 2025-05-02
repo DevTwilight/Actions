@@ -7,7 +7,7 @@ description: |
 inputs:
   prefix:
     description: |
-      List of commit message prefixes to include (one per line).
+      List of commit message prefixes to include (one per line), matching the format: prefix: message.
       For example: added, fixed, improved.
     required: true
 
@@ -39,21 +39,21 @@ runs:
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
 
-        # Split prefixes and filter empty entries
-        $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        # Extract and prepare prefix list
+        $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -ne "" }
         $sectionMap = @{}
 
-        # Handle section mappings
+        # Process section mappings
         if ($sectionInput -ne "") {
             Write-Host "[INFO] Creating sections..."
             foreach ($line in $sectionInput -split "`n") {
                 if ($line -match "^(.*?):(.*)$") {
-                    $sectionMap[$matches[1].Trim()] = $matches[2].Trim()
+                    $sectionMap[$matches[1].Trim().ToLower()] = $matches[2].Trim()
                 }
             }
         }
 
-        # Extract commit log
+        # Get full commit history
         Write-Host "[INFO] Extracting commit history..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
@@ -61,54 +61,56 @@ runs:
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Identify version bump commits
+        # Identify all bump commits
         Write-Host "[INFO] Checking for version bumps..."
-        $versionBumps = $commits | Where-Object { $_.Message -match '^Bump version to \d+\.\d+\.\d+(-dev)?$' }
+        $bumpPattern = '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
+        $versionBumps = $commits | Where-Object { $_.Message -match $bumpPattern }
 
         if ($versionBumps.Count -eq 0) {
             Write-Warning "[WARNING] No version bump commit found. Cannot generate Devlog."
             exit 1
         }
 
-        # If there is at least one bump commit, process the commits
         $currentBump = $versionBumps[0]
-        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+\.\d+(-dev)?')
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
         $version = $versionMatch.Value
         echo "::set-output name=version::$version"
         Write-Host "[INFO] Found version bump: $version"
 
-        # Start the range of commits from the latest bump to the first commit
-        $startIndex = 0
-        $endIndex = $commits.Count - 1
+        $startIndex = $commits.IndexOf($currentBump)
+        $endIndex = if ($versionBumps.Count -ge 2) {
+            $commits.IndexOf($versionBumps[1])
+        } else {
+            $commits.Count
+        }
 
-        # Process commits from the start (if there's no second bump)
-        $rangeCommits = $commits[$startIndex .. $endIndex]
+        # Determine the commit range
+        $rangeCommits = $commits[($startIndex + 1) .. ($endIndex - 1)]
 
-        # Initialize sections for organizing release notes
+        # Group commits by section
         $sections = @{}
 
-        # Loop through the commits and categorize by prefix
         foreach ($commit in $rangeCommits) {
             foreach ($prefix in $prefixes) {
-                if ($commit.Message.ToLower().StartsWith($prefix.ToLower())) {
-                    $clean = $commit.Message.Substring($prefix.Length).Trim()
-                    $heading = if ($sectionMap.ContainsKey($prefix)) { $sectionMap[$prefix] } else { $prefix }
-                    if (-not $sections.ContainsKey($heading)) {
-                        $sections[$heading] = @()
+                if ($commit.Message.ToLower() -like "$prefix:*") {
+                    $clean = $commit.Message.Substring($prefix.Length + 1).Trim()
+                    if ($sectionMap.ContainsKey($prefix)) {
+                        $heading = $sectionMap[$prefix]
+                        if (-not $sections.ContainsKey($heading)) {
+                            $sections[$heading] = @()
+                        }
+                        $sections[$heading] += "- $clean"
                     }
-                    $sections[$heading] += "- $clean"
                     break
                 }
             }
         }
 
-        # Creating Devlog file
         Write-Host "[INFO] Creating Devlog file: $fileName"
         $lines = @()
         $lines += "# Devlog - Version $version"
         $lines += ""
 
-        # If no qualifying commits, write a warning in the console
         if ($sections.Count -eq 0) {
             Write-Warning "[WARNING] No qualifying commits found for this version."
         } else {
