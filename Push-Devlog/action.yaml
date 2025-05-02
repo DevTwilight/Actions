@@ -26,7 +26,7 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: "Generate release notes and write to file"
+    - name: Generate release notes and write to file
       id: generate
       shell: pwsh
       run: |
@@ -39,7 +39,6 @@ runs:
         $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
         $sectionMap = @{}
 
-        # Handle section mappings
         if ($sectionInput -ne "") {
             Write-Host "[INFO] Creating sections..."
             foreach ($line in $sectionInput -split "`n") {
@@ -50,39 +49,43 @@ runs:
         }
 
         Write-Host "[INFO] Extracting commit log..."
-        $log = git log --pretty=format:"%H|%s"
+        $log = git log --date-order --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Host "[INFO] Checking for version bumps..."
+        Write-Host "[INFO] Searching for version bump commits..."
         $versionBumps = $commits | Where-Object { $_.Message -match '^Bump version to \d+\.\d+\.\d+(-dev)?$' }
 
         if ($versionBumps.Count -lt 1) {
-            Write-Host "[ERROR] No version bump commit found."
-            exit 1
+            Write-Host "[INFO] No previous version bump found. Creating first Devlog."
+            $version = "0.1.0-dev"
+            echo "::set-output name=version::$version"
+            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_No previous version bump found. First devlog created._"
+            exit 0
         }
 
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+\.\d+(-dev)?')
         $version = if ($versionMatch.Success) { $versionMatch.Value } else { "unknown" }
 
-        Write-Host "[INFO] Extracted version: $version"
         echo "::set-output name=version::$version"
+        Write-Host "[INFO] Found version bump: $version"
 
         if ($versionBumps.Count -lt 2) {
-            Write-Host "[INFO] This is the first version bump. Creating Devlog with details for $version."
-            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_Release notes for the first version._"
+            Write-Host "[INFO] This is the first version bump. Writing single version Devlog."
+            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_Initial release notes._"
             exit 0
         }
 
         $previousBump = $versionBumps[1]
-        $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = $commits.IndexOf($previousBump)
 
-        if ($startIndex -lt 0 -or $endIndex -lt 0 -or $startIndex -le $endIndex) {
-            Write-Host "[ERROR] Invalid commit range."
+        $startIndex = ($commits | Select-Object -Index 0..($commits.Count - 1) | Where-Object { $_.Hash -eq $currentBump.Hash }).Index
+        $endIndex = ($commits | Select-Object -Index 0..($commits.Count - 1) | Where-Object { $_.Hash -eq $previousBump.Hash }).Index
+
+        if ($startIndex -eq $null -or $endIndex -eq $null -or $startIndex -le $endIndex) {
+            Write-Host "[ERROR] Invalid commit range for release notes."
             exit 1
         }
 
@@ -103,7 +106,7 @@ runs:
             }
         }
 
-        Write-Host "[INFO] Creating Devlog file: $fileName"
+        Write-Host "[INFO] Writing Devlog to file: $fileName"
         $lines = @()
         $lines += "# Devlog - Version $version"
         $lines += ""
@@ -115,4 +118,4 @@ runs:
         }
 
         $lines | Set-Content -Path $fileName -Encoding UTF8
-        Write-Host "[INFO] Devlog file created successfully: $fileName"
+        Write-Host "[INFO] Devlog created successfully: $fileName"
