@@ -32,13 +32,17 @@ runs:
         $sectionMap = @{}
 
         if ($sectionInput -ne "") {
-            Write-Host "Creating custom sections..."
+            Write-Host "Custom section mapping detected."
             foreach ($line in $sectionInput -split "`n") {
                 if ($line -match "^(.*?):(.*)$") {
                     $sectionMap[$matches[1].Trim()] = $matches[2].Trim()
                 }
             }
         }
+
+        $hasSections = $sectionMap.Count -gt 0
+        $entries = @()
+        $sections = @{}
 
         Write-Host "Fetching commit history..."
         $log = git log --pretty=format:"%H|%s"
@@ -47,7 +51,7 @@ runs:
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Host "Detecting version bump commits..."
+        Write-Host "Searching for version bump commits..."
         $versionBumps = $commits | Where-Object {
             $_.Message -match '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
         }
@@ -62,7 +66,6 @@ runs:
         $version = $versionMatch.Value
 
         Write-Host "Version extracted."
-
         echo "version=$version" >> $env:GITHUB_OUTPUT
 
         $startIndex = $commits.IndexOf($currentBump)
@@ -73,18 +76,21 @@ runs:
         }
 
         $rangeCommits = $commits[($startIndex + 1) .. ($endIndex - 1)]
-        $sections = @{}
 
         foreach ($commit in $rangeCommits) {
             foreach ($keyword in $keywords) {
                 $pattern = "^$keyword\s*:\s*(.+)$"
                 if ($commit.Message -match $pattern) {
                     $clean = $matches[1].Trim()
-                    $heading = if ($sectionMap.ContainsKey($keyword)) { $sectionMap[$keyword] } else { $keyword }
-                    if (-not $sections.ContainsKey($heading)) {
-                        $sections[$heading] = @()
+                    if ($hasSections) {
+                        $heading = $sectionMap[$keyword]
+                        if (-not $sections.ContainsKey($heading)) {
+                            $sections[$heading] = @()
+                        }
+                        $sections[$heading] += "- $clean"
+                    } else {
+                        $entries += "- $clean"
                     }
-                    $sections[$heading] += "- $clean"
                     break
                 }
             }
@@ -92,15 +98,15 @@ runs:
 
         Write-Host "Creating Devlog file: $fileName"
         $lines = @()
-        
-        if ($sections.Count -eq 0) {
-            Write-Warning "No qualifying commits found for this version."
-        } else {
+
+        if ($hasSections) {
             foreach ($heading in $sections.Keys) {
                 $lines += "## $heading"
                 $lines += $sections[$heading]
                 $lines += ""
             }
+        } else {
+            $lines += $entries
         }
 
         $lines | Set-Content -Path $fileName -Encoding UTF8
