@@ -70,19 +70,22 @@ runs:
         echo "::set-output name=version::$version"
         Write-Host "[INFO] Found version bump: $version"
 
+        # If only one version bump, this is the first release
+        if ($versionBumps.Count -eq 1) {
+            Write-Host "[INFO] This is the first version bump. Creating Devlog with details for $version."
+            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_No previous version bump found. First devlog created._"
+            exit 0
+        }
+
         $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = -1
+        $endIndex = $commits.IndexOf($versionBumps[1])
 
-        if ($versionBumps.Count -ge 2) {
-            $endIndex = $commits.IndexOf($versionBumps[1])
+        if ($startIndex -lt 0 -or $endIndex -lt 0 -or $startIndex -le $endIndex) {
+            Write-Host "[ERROR] Invalid commit range."
+            exit 1
         }
 
-        $rangeCommits = if ($endIndex -ge 0) {
-            $commits[$endIndex + 1 .. ($startIndex - 1)]
-        } else {
-            $commits[0 .. ($startIndex - 1)]
-        }
-
+        $rangeCommits = $commits[$endIndex + 1 .. ($startIndex - 1)]
         $sections = @{}
 
         foreach ($commit in $rangeCommits) {
