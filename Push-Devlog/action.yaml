@@ -2,69 +2,63 @@ name: Push-Devlog
 
 description: |
   Composite GitHub Action that generates release notes from commit messages
-  and writes them to a custom markdown file based on version bump commits.
+  and writes them to a markdown file based on version bump commits.
 
 inputs:
   prefix:
     description: |
-      List of commit message prefixes to include (one per line), matching the format: prefix: message.
-      For example: added, fixed, improved.
+      List of commit message prefixes to include (one per line), e.g., update, publish.
     required: true
 
   section:
     description: |
       Optional mapping of prefix to section heading. Format: prefix:Section Heading
-      For example: added:New Features, fixed:Bug Fixes.
     required: false
 
   file:
     description: |
-      Name of the output file to write the release notes (e.g., Devlog.md).
+      Name of the output markdown file (e.g., Devlog.md).
     required: true
 
 outputs:
   version:
-    description: "Extracted version number from the version bump commit (e.g., 1.2.3 or 1.2.3-dev)."
+    description: "Extracted version number from the latest version bump commit."
 
 runs:
   using: "composite"
   steps:
-    - name: "Generate release notes and write to file"
-      id: generate
+    - name: Generate Devlog
       shell: pwsh
       run: |
-        Write-Host "[INFO] Starting release notes generation..."
+        Write-Host "[INFO] Starting Devlog generation..."
 
         $prefixInput = "${{ inputs.prefix }}"
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
 
-        # Extract and prepare prefix list
-        $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -ne "" }
+        $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
         $sectionMap = @{}
 
-        # Process section mappings
         if ($sectionInput -ne "") {
             Write-Host "[INFO] Creating sections..."
             foreach ($line in $sectionInput -split "`n") {
                 if ($line -match "^(.*?):(.*)$") {
-                    $sectionMap[$matches[1].Trim().ToLower()] = $matches[2].Trim()
+                    $sectionMap[$matches[1].Trim()] = $matches[2].Trim()
                 }
             }
         }
 
-        # Get full commit history
-        Write-Host "[INFO] Extracting commit history..."
+        Write-Host "[INFO] Fetching commit history..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Identify all bump commits
-        Write-Host "[INFO] Checking for version bumps..."
-        $bumpPattern = '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
-        $versionBumps = $commits | Where-Object { $_.Message -match $bumpPattern }
+        Write-Host "[INFO] Detecting version bump commits..."
+        $versionBumps = $commits | Where-Object {
+            $_.Message -match '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
+        }
 
         if ($versionBumps.Count -eq 0) {
             Write-Warning "[WARNING] No version bump commit found. Cannot generate Devlog."
@@ -74,8 +68,8 @@ runs:
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
         $version = $versionMatch.Value
-        echo "::set-output name=version::$version"
-        Write-Host "[INFO] Found version bump: $version"
+
+        Write-Host "[INFO] Extracted version: $version"
 
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
@@ -84,23 +78,19 @@ runs:
             $commits.Count
         }
 
-        # Determine the commit range
         $rangeCommits = $commits[($startIndex + 1) .. ($endIndex - 1)]
-
-        # Group commits by section
         $sections = @{}
 
         foreach ($commit in $rangeCommits) {
             foreach ($prefix in $prefixes) {
-                if ($commit.Message.ToLower() -like "$prefix:*") {
-                    $clean = $commit.Message.Substring($prefix.Length + 1).Trim()
-                    if ($sectionMap.ContainsKey($prefix)) {
-                        $heading = $sectionMap[$prefix]
-                        if (-not $sections.ContainsKey($heading)) {
-                            $sections[$heading] = @()
-                        }
-                        $sections[$heading] += "- $clean"
+                $pattern = "^$prefix\s*:\s*(.+)$"
+                if ($commit.Message -match $pattern) {
+                    $clean = $matches[1].Trim()
+                    $heading = if ($sectionMap.ContainsKey($prefix)) { $sectionMap[$prefix] } else { $prefix }
+                    if (-not $sections.ContainsKey($heading)) {
+                        $sections[$heading] = @()
                     }
+                    $sections[$heading] += "- $clean"
                     break
                 }
             }
