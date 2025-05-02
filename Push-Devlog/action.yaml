@@ -8,11 +8,13 @@ inputs:
   prefix:
     description: |
       List of commit message prefixes to include (one per line).
+      For example: added, fixed, improved.
     required: true
 
   section:
     description: |
       Optional mapping of prefix to section heading. Format: prefix:Section Heading
+      For example: added:New Features, fixed:Bug Fixes.
     required: false
 
   file:
@@ -37,9 +39,11 @@ runs:
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
 
+        # Split prefixes and filter empty entries
         $prefixes = $prefixInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
         $sectionMap = @{}
 
+        # Handle section mappings
         if ($sectionInput -ne "") {
             Write-Host "[INFO] Creating sections..."
             foreach ($line in $sectionInput -split "`n") {
@@ -49,6 +53,7 @@ runs:
             }
         }
 
+        # Extract commit log
         Write-Host "[INFO] Extracting commit history..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
@@ -56,38 +61,33 @@ runs:
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
+        # Identify version bump commits
         Write-Host "[INFO] Checking for version bumps..."
         $versionBumps = $commits | Where-Object { $_.Message -match '^Bump version to \d+\.\d+\.\d+(-dev)?$' }
 
         if ($versionBumps.Count -eq 0) {
-            Write-Host "[ERROR] No version bump commit found. Cannot generate Devlog."
+            Write-Warning "[WARNING] No version bump commit found. Cannot generate Devlog."
             exit 1
         }
 
+        # If there is at least one bump commit, process the commits
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+\.\d+(-dev)?')
         $version = $versionMatch.Value
         echo "::set-output name=version::$version"
         Write-Host "[INFO] Found version bump: $version"
 
-        # If only one version bump, this is the first release
-        if ($versionBumps.Count -eq 1) {
-            Write-Host "[INFO] This is the first version bump. Creating Devlog with details for $version."
-            Set-Content -Path $fileName -Value "# Devlog - Version $version`n`n_No previous version bump found. First devlog created._"
-            exit 0
-        }
+        # Start the range of commits from the latest bump to the first commit
+        $startIndex = 0
+        $endIndex = $commits.Count - 1
 
-        $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = $commits.IndexOf($versionBumps[1])
+        # Process commits from the start (if there's no second bump)
+        $rangeCommits = $commits[$startIndex .. $endIndex]
 
-        if ($startIndex -lt 0 -or $endIndex -lt 0 -or $startIndex -le $endIndex) {
-            Write-Host "[ERROR] Invalid commit range."
-            exit 1
-        }
-
-        $rangeCommits = $commits[$endIndex + 1 .. ($startIndex - 1)]
+        # Initialize sections for organizing release notes
         $sections = @{}
 
+        # Loop through the commits and categorize by prefix
         foreach ($commit in $rangeCommits) {
             foreach ($prefix in $prefixes) {
                 if ($commit.Message.ToLower().StartsWith($prefix.ToLower())) {
@@ -102,13 +102,15 @@ runs:
             }
         }
 
+        # Creating Devlog file
         Write-Host "[INFO] Creating Devlog file: $fileName"
         $lines = @()
         $lines += "# Devlog - Version $version"
         $lines += ""
 
+        # If no qualifying commits, write a warning in the console
         if ($sections.Count -eq 0) {
-            $lines += "_No qualifying commits found for this version._"
+            Write-Warning "[WARNING] No qualifying commits found for this version."
         } else {
             foreach ($heading in $sections.Keys) {
                 $lines += "## $heading"
