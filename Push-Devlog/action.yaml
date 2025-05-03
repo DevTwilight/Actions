@@ -3,10 +3,6 @@ name: Push-Devlog
 inputs:
   keywords:
     required: true
-  section:
-    required: false
-  file:
-    required: true
 
 outputs:
   version:
@@ -23,26 +19,12 @@ runs:
       run: |
         $repo = $env:REPO
         $repoUrl = "https://github.com/$repo"
+        $fileName = "Devlog.md"
 
         $keywordsInput = "${{ inputs.keywords }}"
-        $sectionInput = "${{ inputs.section }}"
-        $fileName = "${{ inputs.file }}"
-
         $keywords = $keywordsInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
-        $sectionMap = @{}
 
-        if ($sectionInput -ne "") {
-            Write-Host "Custom section mapping detected."
-            foreach ($line in $sectionInput -split "`n") {
-                if ($line -match "^(.*?):(.*)$") {
-                    $sectionMap[$matches[1].Trim()] = $matches[2].Trim()
-                }
-            }
-        }
-
-        $hasSections = $sectionMap.Count -gt 0
         $entries = @()
-        $sections = @{}
         $seenMessages = @{}
 
         Write-Host "Fetching commit history..."
@@ -104,32 +86,12 @@ runs:
                     $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($repoUrl/pull/`$1)"
                     $clean = $clean -replace "#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
 
-                    if ($hasSections) {
-                        $heading = $sectionMap[$keyword]
-                        if (-not $sections.ContainsKey($heading)) {
-                            $sections[$heading] = @()
-                        }
-                        $sections[$heading] += "- $clean"
-                    } else {
-                        $entries += "- $clean"
-                    }
+                    $entries += "- $clean"
                     break
                 }
             }
         }
 
         Write-Host "Creating Devlog file: $fileName"
-        $lines = @()
-
-        if ($hasSections) {
-            foreach ($heading in $sections.Keys) {
-                $lines += "## $heading"
-                $lines += $sections[$heading]
-                $lines += ""
-            }
-        } else {
-            $lines += $entries
-        }
-
-        $lines | Set-Content -Path $fileName -Encoding UTF8
+        $entries | Set-Content -Path $fileName -Encoding UTF8
         Write-Host "Devlog file created successfully: $fileName"
