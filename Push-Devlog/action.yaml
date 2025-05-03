@@ -42,7 +42,8 @@ runs:
 
         $hasSections = $sectionMap.Count -gt 0
         $entries = @()
-        $sections = @{}
+        $sections = @()
+        $seenMessages = @{}
 
         Write-Host "Fetching commit history..."
         $log = git log --pretty=format:"%H|%s"
@@ -82,6 +83,12 @@ runs:
                 $pattern = "^$keyword\s*:\s*(.+)$"
                 if ($commit.Message -match $pattern) {
                     $clean = $matches[1].Trim()
+
+                    # Skip duplicates
+                    if ($seenMessages.ContainsKey($clean)) {
+                        continue
+                    }
+                    $seenMessages[$clean] = $true
 
                     # Link conversion
                     $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($repoUrl/pull/`$1)"
