@@ -3,6 +3,8 @@ name: Push-Devlog
 inputs:
   keywords:
     required: true
+  commit_message:
+    required: true
 
 outputs:
   version:
@@ -22,8 +24,9 @@ runs:
         $fileName = "Devlog.md"
 
         $keywordsInput = "${{ inputs.keywords }}"
-        $keywords = $keywordsInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+        $versionBumpMessage = "${{ inputs.commit_message }}"
 
+        $keywords = $keywordsInput -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
         $entries = @()
         $seenMessages = @{}
 
@@ -34,13 +37,15 @@ runs:
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Host "Searching for version bump commits..."
+        Write-Host "Searching for version bump commits with message '$versionBumpMessage'..."
+        $pattern = [regex]::Escape($versionBumpMessage) + '\d+\.\d+(?:\.\d+)?(?:-dev)?'
+
         $versionBumps = $commits | Where-Object {
-            $_.Message -match '^Bump version to \d+\.\d+(?:\.\d+)?(?:-dev)?$'
+            $_.Message -match "^$pattern$"
         }
 
         if ($versionBumps.Count -eq 0) {
-            Write-Warning "No version bump commit found. Cannot generate Devlog."
+            Write-Warning "No version bump commit found using message '$versionBumpMessage'. Cannot generate Devlog."
             exit 1
         }
 
@@ -50,7 +55,7 @@ runs:
 
         # Check for duplicate version bump earlier in history
         $duplicate = $versionBumps | Where-Object {
-            $_.Message -eq "Bump version to $version" -and $_.Hash -ne $currentBump.Hash
+            $_.Message -eq "$versionBumpMessage$version" -and $_.Hash -ne $currentBump.Hash
         }
 
         if ($duplicate.Count -gt 0) {
