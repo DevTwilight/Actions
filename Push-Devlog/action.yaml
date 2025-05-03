@@ -83,7 +83,8 @@ runs:
                 if ($commit.Message -match $pattern) {
                     $clean = $matches[1].Trim()
 
-                    # Convert issue references to clickable GitHub links
+                    # Link conversion
+                    $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($repoUrl/pull/`$1)"
                     $clean = $clean -replace "#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
 
                     if ($hasSections) {
