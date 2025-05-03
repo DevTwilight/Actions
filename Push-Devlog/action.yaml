@@ -15,15 +15,15 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
     - name: Generate Devlog
       id: set-version
       shell: pwsh
+      env:
+        REPO: ${{ github.repository }}
       run: |
+        $repo = $env:REPO
+        $repoUrl = "https://github.com/$repo"
+
         $keywordsInput = "${{ inputs.keywords }}"
         $sectionInput = "${{ inputs.section }}"
         $fileName = "${{ inputs.file }}"
@@ -82,6 +82,10 @@ runs:
                 $pattern = "^$keyword\s*:\s*(.+)$"
                 if ($commit.Message -match $pattern) {
                     $clean = $matches[1].Trim()
+
+                    # Convert issue references to clickable GitHub links
+                    $clean = $clean -replace "#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
+
                     if ($hasSections) {
                         $heading = $sectionMap[$keyword]
                         if (-not $sections.ContainsKey($heading)) {
