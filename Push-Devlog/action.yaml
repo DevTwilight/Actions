@@ -42,7 +42,7 @@ runs:
 
         $hasSections = $sectionMap.Count -gt 0
         $entries = @()
-        $sections = @()
+        $sections = @{}
         $seenMessages = @{}
 
         Write-Host "Fetching commit history..."
@@ -65,6 +65,16 @@ runs:
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
         $version = $versionMatch.Value
+
+        # Check for duplicate version bump earlier in history
+        $duplicate = $versionBumps | Where-Object {
+            $_.Message -eq "Bump version to $version" -and $_.Hash -ne $currentBump.Hash
+        }
+
+        if ($duplicate.Count -gt 0) {
+            Write-Warning "Duplicate version bump found for version $version. Skipping Devlog generation."
+            exit 0
+        }
 
         Write-Host "Version extracted."
         echo "version=$version" >> $env:GITHUB_OUTPUT
