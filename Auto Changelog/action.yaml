@@ -1,4 +1,4 @@
-name: Auto Changelog Generation
+name: Auto Changelog 
 
 inputs:
   repo:
