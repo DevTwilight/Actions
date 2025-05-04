@@ -1,5 +1,6 @@
 name: Auto Changelog
 description: Generates a changelog from commit messages
+
 inputs:
   repo:
     description: 'Target repository (Repo B)'
@@ -76,7 +77,9 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        $pattern = [regex]::Escape($commitMessagePattern) + '\d+\.\d+(?:\.\d+)?(?:-dev)?'
+        # Updated regex pattern to match version bumps like `Bump version to X.Y.Z`
+        $pattern = [regex]::Escape($commitMessagePattern) + '\s+\d+\.\d+(?:\.\d+)?'
+        
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
         if ($versionBumps.Count -eq 0) {
@@ -85,7 +88,7 @@ runs:
         }
 
         $currentBump = $versionBumps[0]
-        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?')
         $version = $versionMatch.Value
 
         Write-Host "Detected version bump: $version"
