@@ -2,27 +2,27 @@ name: Auto Changelog
 
 inputs:
   repo:
+    description: 'Target repository (Repo B)'
     required: true
-    description: Target repository (Repo B)
   commit_message:
+    description: 'Commit message pattern for version bumps'
     required: true
-    description: Commit message pattern for version bumps
   sections:
+    description: 'Mapping of commit keywords to changelog section titles'
     required: true
-    description: Mapping of commit keywords to changelog section titles
   file:
+    description: 'Path to changelog file to write/update'
     required: true
-    description: Path to changelog file to write/update
   token:
+    description: 'GitHub token with write access to Repo B'
     required: true
-    description: GitHub token with write access to Repo B
   title:
+    description: 'Title for the changelog version block'
     required: true
-    description: Title for the changelog version block
 
 outputs:
   version:
-    value: ${{ steps.set-version.outputs.version }}
+    description: 'The detected version from the changelog'
 
 runs:
   using: "composite"
