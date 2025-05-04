@@ -1,29 +1,3 @@
-name: Auto Changelog
-
-inputs:
-  repo:
-    description: 'Target repository (Repo B)'
-    required: true
-  commit_message:
-    description: 'Commit message pattern for version bumps'
-    required: true
-  sections:
-    description: 'Mapping of commit keywords to changelog section titles'
-    required: true
-  file:
-    description: 'Path to changelog file to write/update'
-    required: true
-  token:
-    description: 'GitHub token with write access to Repo B'
-    required: true
-  title:
-    description: 'Title for the changelog version block'
-    required: true
-
-outputs:
-  version:
-    description: 'The detected version from the changelog'
-
 runs:
   using: "composite"
   steps:
@@ -37,9 +11,7 @@ runs:
         $targetRepoUrl = "https://github.com/${{ inputs.repo }}"
 
         $commitMessagePattern = "${{ inputs.commit_message }}"
-        $sectionsInput = @"
-${{ inputs.sections }}
-"@
+        $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
