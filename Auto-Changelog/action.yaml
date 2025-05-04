@@ -1,3 +1,29 @@
+name: Auto Changelog
+description: Generates a changelog from commit messages
+inputs:
+  repo:
+    description: 'Target repository (Repo B)'
+    required: true
+  commit_message:
+    description: 'Commit message pattern for version bumps'
+    required: true
+  sections:
+    description: 'Mapping of commit keywords to changelog section titles'
+    required: true
+  file:
+    description: 'Path to changelog file to write/update'
+    required: true
+  token:
+    description: 'GitHub token with write access to Repo B'
+    required: true
+  title:
+    description: 'Title for the changelog version block'
+    required: true
+
+outputs:
+  version:
+    description: 'The detected version from the changelog'
+
 runs:
   using: "composite"
   steps:
@@ -15,15 +41,25 @@ runs:
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
+        # Parse sections input
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
-          $sectionParts = $_.Trim() -split ":", 2
-          if ($sectionParts.Count -eq 2) {
-            $sections[$sectionParts[0].Trim()] = $sectionParts[1].Trim()
-          } else {
-            Write-Error "Invalid section format: $($_)"
+          $_ = $_.Trim()
+
+          if ([string]::IsNullOrWhiteSpace($_)) {
+            return
+          }
+
+          $sectionParts = $_ -split ":", 2
+
+          if ($sectionParts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($sectionParts[0]) -or [string]::IsNullOrWhiteSpace($sectionParts[1])) {
+            Write-Error "Invalid section format: '$_'. Expected format: 'Keyword: Title'"
             exit 1
           }
+
+          $key = $sectionParts[0].Trim()
+          $value = $sectionParts[1].Trim()
+          $sections[$key] = $value
         }
 
         foreach ($keyword in $sections.Keys) {
@@ -58,8 +94,8 @@ runs:
         $startIndex = $commits.IndexOf($currentBump)
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
 
-        $entries = @{ }
-        $seenMessages = @{ }
+        $entries = @{}
+        $seenMessages = @{}
 
         foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
