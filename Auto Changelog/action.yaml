@@ -1,40 +1,64 @@
-name: Auto Changelog - Commit Message Logic
+name: Auto Changelog
+description: Generates a changelog based on commit history and version bump detection.
 
 inputs:
+  repo:
+    required: true
+  sections:
+    required: true
   commit_message:
     required: true
-
-outputs:
-  version:
-    value: ${{ steps.handle-commit-message.outputs.version }}
+  token:
+    required: true
 
 runs:
   using: "composite"
   steps:
-    - name: Handle Commit Message Input
-      id: handle-commit-message
+    - name: Generate Changelog
+      id: set-changelog
       shell: pwsh
       env:
         REPO: ${{ github.repository }}
       run: |
-        $InformationPreference = "Continue"
         $repo = $env:REPO
         $repoUrl = "https://github.com/$repo"
         $commitMessagePattern = "${{ inputs.commit_message }}"
+        $sectionInput = "${{ inputs.sections }}"
 
-        Write-Information "Fetching commit history..."
+        # Parse and validate sections
+        $sectionMap = @{}
+        $sectionInput -split "`n" | ForEach-Object {
+          $parts = $_ -split ":", 2
+          if ($parts.Count -eq 2) {
+            $sectionMap[$parts[0].Trim()] = $parts[1].Trim()
+          }
+        }
+
+        # Handle cases where section input is incomplete
+        foreach ($key in $sectionMap.Keys) {
+          if (-not $sectionMap[$key]) {
+            Write-Warning "Section for keyword '$key' is missing! Failing the action..."
+            exit 1
+          }
+        }
+
+        # Fetch commit history
+        Write-Host "Fetching commit history..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
           $parts = $_ -split "\|", 2
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        Write-Information "Searching for version bump commits matching pattern '$commitMessagePattern'..."
+        Write-Host "Searching for version bump commits with message '$commitMessagePattern'..."
         $pattern = [regex]::Escape($commitMessagePattern) + '\d+\.\d+(?:\.\d+)?(?:-dev)?'
-        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
+
+        $versionBumps = $commits | Where-Object {
+          $_.Message -match "^$pattern$"
+        }
 
         if ($versionBumps.Count -eq 0) {
-          Write-Warning "No version bump commit found using message pattern '$commitMessagePattern'."
+          Write-Warning "No version bump commit found using message '$commitMessagePattern'. Cannot generate changelog."
           exit 1
         }
 
@@ -52,15 +76,62 @@ runs:
           exit 0
         }
 
-        Write-Information "Version bump detected: $version"
+        Write-Host "Version extracted: $version"
         echo "version=$version" >> $env:GITHUB_OUTPUT
 
-        $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = if ($versionBumps.Count -ge 2) {
-          $commits.IndexOf($versionBumps[1])
-        } else {
-          $commits.Count
+        # Initialize entries by section
+        $entriesBySection = @{}
+        $seenMessages = @{}
+        foreach ($key in $sectionMap.Keys) {
+          $entriesBySection[$sectionMap[$key]] = @()
         }
 
-        $rangeCommits = $commits[($startIndex + 1) .. ($endIndex - 1)]
-        Write-Information "Total commits selected for changelog: $($rangeCommits.Count)"
+        # Process commits for changelog
+        foreach ($commit in $commits) {
+          $matched = $false
+
+          foreach ($key in $sectionMap.Keys) {
+            $regex = "^$key\s*:\s*(.+)$"
+            if ($commit.Message -match $regex) {
+              $clean = $matches[1].Trim()
+
+              # Skip duplicate messages
+              if ($seenMessages.ContainsKey($clean)) {
+                $matched = $true
+                break
+              }
+
+              $seenMessages[$clean] = $true
+
+              # Link conversions
+              $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($repoUrl/pull/`$1)"
+              $clean = $clean -replace "#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
+
+              $sectionTitle = $sectionMap[$key]
+              $entriesBySection[$sectionTitle] += "- $clean"
+              $matched = $true
+              break
+            }
+          }
+
+          # If no section was matched and keyword is unknown
+          if (-not $matched) {
+            Write-Warning "Commit message '${commit.Message}' does not match any known section keyword. Failing..."
+            exit 1
+          }
+        }
+
+        # Construct the changelog content
+        $changelogContent = "# Changelog`n"
+        $changelogContent += "## Version $version`n"
+
+        foreach ($section in $entriesBySection.Keys) {
+          if ($entriesBySection[$section].Count -gt 0) {
+            $changelogContent += "### $section`n"
+            $changelogContent += $entriesBySection[$section] -join "`n"
+            $changelogContent += "`n"
+          }
+        }
+
+        Write-Host "Changelog content generated"
+        echo "changelog=$changelogContent" >> $env:GITHUB_OUTPUT
