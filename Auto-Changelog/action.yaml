@@ -86,8 +86,8 @@ ${{ inputs.sections }}
         $startIndex = $commits.IndexOf($currentBump)
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
 
-        $entries = @{}
-        $seenMessages = @{}
+        $entries = @{ }
+        $seenMessages = @{ }
 
         foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
