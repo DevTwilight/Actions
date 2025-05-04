@@ -1,4 +1,4 @@
-name: Auto Changelog 
+name: Auto Changelog
 
 inputs:
   repo:
@@ -51,12 +51,10 @@ runs:
           }
         }
 
-        # Check for missing section headings and raise a warning
-        foreach ($keyword in $sections.Keys) {
-          if (-not $sections[$keyword]) {
-            Write-Warning "No section heading provided for keyword '$keyword'."
-            exit 1
-          }
+        # Ensure sections are present
+        if ($sections.Count -eq 0) {
+          Write-Error "No sections found."
+          exit 1
         }
 
         # Fetch commit history from Repo A
