@@ -1,35 +1,66 @@
-name: Auto Changelog
-description: Generates a changelog based on commit history and version bump detection.
+name: Auto Changelog - Commit Message Logic
 
 inputs:
-  repo:
-    description: 'The destination repository (Repo B) where the changelog will be committed. Format: user/repo'
-    required: true
-  sections:
-    description: |
-      Combined input of keywords and their section headings. 
-      Format each on a new line using `Keyword: Section Title`. 
-      Example:
-      ```
-      Fix: Bug Fixes
-      Feature: New Features
-      ```
-    required: true
-  file:
-    description: 'The path and filename (relative to workspace) for the generated changelog.'
-    required: true
-  title:
-    description: 'The title to appear at the top of the changelog.'
-    required: true
   commit_message:
-    description: |
-      The version bump commit message pattern used to detect version commits.
-      Example: `chore: release v` will match `chore: release v1.2.3`
-    required: true
-  token:
-    description: 'Personal Access Token (PAT) with write access to Repo B.'
     required: true
 
 outputs:
   version:
-    description: 'The version string extracted from the detected version bump commit.'
+    value: ${{ steps.handle-commit-message.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Handle Commit Message Input
+      id: handle-commit-message
+      shell: pwsh
+      env:
+        REPO: ${{ github.repository }}
+      run: |
+        $InformationPreference = "Continue"
+        $repo = $env:REPO
+        $repoUrl = "https://github.com/$repo"
+        $commitMessagePattern = "${{ inputs.commit_message }}"
+
+        Write-Information "Fetching commit history..."
+        $log = git log --pretty=format:"%H|%s"
+        $commits = $log -split "`n" | ForEach-Object {
+          $parts = $_ -split "\|", 2
+          [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
+        }
+
+        Write-Information "Searching for version bump commits matching pattern '$commitMessagePattern'..."
+        $pattern = [regex]::Escape($commitMessagePattern) + '\d+\.\d+(?:\.\d+)?(?:-dev)?'
+        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
+
+        if ($versionBumps.Count -eq 0) {
+          Write-Warning "No version bump commit found using message pattern '$commitMessagePattern'."
+          exit 1
+        }
+
+        $currentBump = $versionBumps[0]
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
+        $version = $versionMatch.Value
+
+        # Check for duplicate version bump earlier in history
+        $duplicate = $versionBumps | Where-Object {
+          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
+        }
+
+        if ($duplicate.Count -gt 0) {
+          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
+          exit 0
+        }
+
+        Write-Information "Version bump detected: $version"
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+
+        $startIndex = $commits.IndexOf($currentBump)
+        $endIndex = if ($versionBumps.Count -ge 2) {
+          $commits.IndexOf($versionBumps[1])
+        } else {
+          $commits.Count
+        }
+
+        $rangeCommits = $commits[($startIndex + 1) .. ($endIndex - 1)]
+        Write-Information "Total commits selected for changelog: $($rangeCommits.Count)"
