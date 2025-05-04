@@ -1,4 +1,4 @@
-name: Auto Changelog
+name: Auto Changelog Generation
 
 inputs:
   repo:
@@ -12,7 +12,7 @@ inputs:
   token:
     required: true
   title:
-    required: true  # Version title input
+    required: true
 
 outputs:
   version:
@@ -37,7 +37,7 @@ runs:
         $commitMessagePattern = "${{ inputs.commit_message }}"
         $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
-        $title = "${{ inputs.title }}"  # Version title
+        $versionTitle = "${{ inputs.title }}"
         
         # Parse sections input
         $sections = @{}
@@ -60,7 +60,7 @@ runs:
         }
 
         # Fetch commit history from Repo A
-        Write-Information "Fetching commit history from source repository ($sourceRepoUrl)..."
+        Write-Host "Fetching commit history from source repository ($sourceRepoUrl)..."
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
           $parts = $_ -split "\|", 2
@@ -90,7 +90,7 @@ runs:
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
         
         $entries = @()
-        $seenMessages = @{}
+        $seenMessages = @{ }
 
         foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
@@ -109,51 +109,40 @@ runs:
               $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
               $clean = $clean -replace "#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
 
+              # Add commit under the corresponding section
               $entries += "- $clean"
               break
             }
           }
         }
 
-        # Check if changelog entries exist
+        # Ensure the changelog has entries
         if ($entries.Count -eq 0) {
           Write-Warning "No commits found matching the defined sections and commit messages."
           exit 1
         }
 
-        # Prepare the changelog block dynamically based on inputs
+        # Prepare new changelog block with the title
         $newBlock = @()
-        $newBlock += $title  # Use the 'title' input for the version heading
-        $newBlock += ""  # Add a blank line for separation
-
-        # Loop over each section to generate content for the changelog
-        foreach ($keyword in $sections.Keys) {
-            $sectionTitle = $sections[$keyword]  # Get the section title
-            if ($sectionTitle) {
-                $newBlock += "### $keyword"  # Add section title (like 'Features', 'Bug Fixes', etc.)
-                $newBlock += ""
-                $newBlock += $sectionTitle  # Add the entries for the section (from the commit messages)
-                $newBlock += ""
-            }
+        $newBlock += $versionTitle
+        $newBlock += ""
+        
+        # Add sections with entries under each heading
+        foreach ($section in $sections.Keys) {
+          $newBlock += "### $section"
+          $newBlock += ""
+          $newBlock += $entries -join "`n"
+          $newBlock += ""
         }
 
-        # Now, check if the file already exists, and append accordingly
-        $existingContent = ""
-        if (Test-Path $filePath) {
-            $existingContent = Get-Content -Path $filePath -Raw
+        # Prepare file path and ensure directory exists
+        $fileDir = Split-Path -Path $filePath -Parent
+        if (-not (Test-Path $fileDir)) {
+          Write-Information "Creating directory for changelog file: $fileDir"
+          New-Item -ItemType Directory -Path $fileDir
         }
 
-        # Append or create the changelog file
-        if ($existingContent -ne "") {
-            # Ensure the changelog has the new version at the top
-            Write-Information "Appending changelog content to the existing file."
-            $existingContent = $newBlock + $existingContent
-        } else {
-            Write-Information "Creating a new changelog file."
-            $existingContent = $newBlock
-        }
-
-        # Write the updated changelog content to the file
-        Write-Information "Writing the changelog to file: $filePath"
-        $existingContent | Set-Content -Path $filePath -Encoding UTF8
-        Write-Information "Changelog file created/updated successfully at $filePath"
+        # Write the changelog to the specified file
+        Write-Host "Creating or updating changelog file: $filePath"
+        $newBlock | Set-Content -Path $filePath -Encoding UTF8
+        Write-Host "Changelog file created/updated successfully at $filePath"
