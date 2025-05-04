@@ -79,7 +79,7 @@ runs:
 
         # Updated regex pattern to match version bumps like `Bump version to X.Y.Z`
         $pattern = [regex]::Escape($commitMessagePattern) + '\s+\d+\.\d+(?:\.\d+)?'
-        
+
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
         if ($versionBumps.Count -eq 0) {
