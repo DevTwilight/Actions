@@ -27,31 +27,30 @@ runs:
       env:
         REPO: ${{ github.repository }}
       run: |
-        # Repo A (Source Repo URL) where the action is running
         $sourceRepoUrl = "https://github.com/${{ github.repository }}"
-
-        # Repo B (Target Repo URL) where the changelog will be committed
         $targetRepoUrl = "https://github.com/${{ inputs.repo }}"
 
-        # Input variables
         $commitMessagePattern = "${{ inputs.commit_message }}"
-        $sectionsInput = "${{ inputs.sections }}"
+        $sectionsInput = @"
+${{ inputs.sections }}
+"@
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
-        
+
         # Parse sections input
         $sections = @{}
-        $sectionsInput -split "`n" | ForEach-Object {
-          $sectionParts = $_.Trim() -split ":", 2
+        $lines = $sectionsInput -split "`r?`n"
+        foreach ($line in $lines) {
+          if (-not $line.Trim()) { continue }
+          $sectionParts = $line.Trim() -split ":", 2
           if ($sectionParts.Count -eq 2) {
             $sections[$sectionParts[0].Trim()] = $sectionParts[1].Trim()
           } else {
-            Write-Error "Invalid section format: $($_)"
+            Write-Error "Invalid section format: $line"
             exit 1
           }
         }
 
-        # Check for missing section headings and raise a warning
         foreach ($keyword in $sections.Keys) {
           if (-not $sections[$keyword]) {
             Write-Warning "No section heading provided for keyword '$keyword'."
@@ -67,7 +66,7 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Search for version bump commits
+        # Find version bump commits
         $pattern = [regex]::Escape($commitMessagePattern) + '\d+\.\d+(?:\.\d+)?(?:-dev)?'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
@@ -76,73 +75,70 @@ runs:
           exit 1
         }
 
-        # Extract version from the latest bump
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-dev)?')
         $version = $versionMatch.Value
 
         Write-Information "Detected version bump: $version"
-
         echo "version=$version" >> $env:GITHUB_OUTPUT
 
-        # Process commits for changelog generation, excluding version bump commit
         $startIndex = $commits.IndexOf($currentBump)
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
-        
-        $entries = @()
-        $seenMessages = @{ }
 
+        $entriesBySection = @{}
+        foreach ($key in $sections.Keys) { $entriesBySection[$key] = @() }
+
+        $seenMessages = @{}
         foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
             $pattern = "^$keyword\s*:\s*(.+)$"
             if ($commit.Message -match $pattern) {
               $clean = $matches[1].Trim()
-
-              # Skip duplicate commit messages
-              if ($seenMessages.ContainsKey($clean)) {
-                continue
-              }
-
+              if ($seenMessages.ContainsKey($clean)) { continue }
               $seenMessages[$clean] = $true
 
-              # Convert issue/PR links in commit message
               $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
               $clean = $clean -replace "#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
-
-              # Add commit under the corresponding section
-              $entries += "- $clean"
+              $entriesBySection[$keyword] += "- $clean"
               break
             }
           }
         }
 
-        # Ensure the changelog has entries
-        if ($entries.Count -eq 0) {
+        $hasEntries = $false
+        foreach ($section in $entriesBySection.Values) {
+          if ($section.Count -gt 0) {
+            $hasEntries = $true
+            break
+          }
+        }
+
+        if (-not $hasEntries) {
           Write-Warning "No commits found matching the defined sections and commit messages."
           exit 1
         }
 
-        # Prepare new changelog block with the title
+        # Generate new changelog content
         $newBlock = @()
         $newBlock += $versionTitle
         $newBlock += ""
-        
-        # Add sections with entries under each heading
-        foreach ($section in $sections.Keys) {
-          $newBlock += "### $section"
-          $newBlock += ""
-          $newBlock += $entries -join "`n"
-          $newBlock += ""
+
+        foreach ($keyword in $sections.Keys) {
+          $sectionTitle = $sections[$keyword]
+          $entries = $entriesBySection[$keyword]
+          if ($entries.Count -gt 0) {
+            $newBlock += "### $sectionTitle"
+            $newBlock += ""
+            $newBlock += $entries
+            $newBlock += ""
+          }
         }
 
-        # Prepare file path and ensure directory exists
         $fileDir = Split-Path -Path $filePath -Parent
         if (-not (Test-Path $fileDir)) {
           Write-Information "Creating directory for changelog file: $fileDir"
-          New-Item -ItemType Directory -Path $fileDir
+          New-Item -ItemType Directory -Path $fileDir -Force | Out-Null
         }
 
-        # Write the changelog to the specified file
-        Write-Host "Creating or updating changelog file: $filePath"
         $newBlock | Set-Content -Path $filePath -Encoding UTF8
         Write-Host "Changelog file created/updated successfully at $filePath"
