@@ -1,0 +1,35 @@
+name: Auto Changelog
+description: Generates a changelog based on commit history and version bump detection.
+
+inputs:
+  repo:
+    description: 'The destination repository (Repo B) where the changelog will be committed. Format: user/repo'
+    required: true
+  sections:
+    description: |
+      Combined input of keywords and their section headings. 
+      Format each on a new line using `Keyword: Section Title`. 
+      Example:
+      ```
+      Fix: Bug Fixes
+      Feature: New Features
+      ```
+    required: true
+  file:
+    description: 'The path and filename (relative to workspace) for the generated changelog.'
+    required: true
+  title:
+    description: 'The title to appear at the top of the changelog.'
+    required: true
+  commit_message:
+    description: |
+      The version bump commit message pattern used to detect version commits.
+      Example: `chore: release v` will match `chore: release v1.2.3`
+    required: true
+  token:
+    description: 'Personal Access Token (PAT) with write access to Repo B.'
+    required: true
+
+outputs:
+  version:
+    description: 'The version string extracted from the detected version bump commit.'
