@@ -6,19 +6,19 @@ inputs:
     description: 'Target repository (Repo B)'
     required: true
   commit_message:
-    description: 'Commit message pattern for version bumps'
+    description: 'Commit message pattern for version bumps (e.g., "Bump version to ")'
     required: true
   sections:
-    description: 'Mapping of commit keywords to changelog section titles'
+    description: 'Mapping of commit keywords to changelog section titles (e.g., "Feat: New features")'
     required: true
   file:
-    description: 'Path to changelog file to write/update'
+    description: 'Path to changelog file to write/update (e.g., Devlog.md)'
     required: true
   token:
     description: 'GitHub token with write access to Repo B'
     required: true
   title:
-    description: 'Title for the changelog version block'
+    description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
     required: true
 
 outputs:
@@ -42,32 +42,19 @@ runs:
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
-        # Parse sections input
+        # Parse sections input into hashtable
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
-
-          if ([string]::IsNullOrWhiteSpace($_)) {
-            return
+          if ($_ -and ($_ -match "^.+:.+$")) {
+            $key, $value = $_ -split ":", 2
+            $sections[$key.Trim()] = $value.Trim()
           }
-
-          $sectionParts = $_ -split ":", 2
-
-          if ($sectionParts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($sectionParts[0]) -or [string]::IsNullOrWhiteSpace($sectionParts[1])) {
-            Write-Error "Invalid section format: '$_'. Expected format: 'Keyword: Title'"
-            exit 1
-          }
-
-          $key = $sectionParts[0].Trim()
-          $value = $sectionParts[1].Trim()
-          $sections[$key] = $value
         }
 
-        foreach ($keyword in $sections.Keys) {
-          if (-not $sections[$keyword]) {
-            Write-Warning "No section heading provided for keyword '$keyword'."
-            exit 1
-          }
+        if ($sections.Count -eq 0) {
+          Write-Error "No valid sections found in input."
+          exit 1
         }
 
         Write-Host "Fetching commit history..."
@@ -77,25 +64,35 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Updated regex pattern to match version bumps like `Bump version to X.Y.Z`
-        $pattern = [regex]::Escape($commitMessagePattern) + '\s+\d+\.\d+(?:\.\d+)?'
-
+        # Match version bump commits
+        $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
         if ($versionBumps.Count -eq 0) {
-          Write-Warning "No version bump commit found using message '$commitMessagePattern'."
+          Write-Warning "No version bump commits found with pattern '$commitMessagePattern'."
           exit 1
         }
 
         $currentBump = $versionBumps[0]
-        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?')
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
         $version = $versionMatch.Value
-
-        Write-Host "Detected version bump: $version"
         echo "version=$version" >> $env:GITHUB_OUTPUT
 
+        Write-Host "Detected version bump: $version"
+
+        # Determine commit range
         $startIndex = $commits.IndexOf($currentBump)
-        $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
+        $endIndex = if ($versionBumps.Count -ge 2) {
+          $commits.IndexOf($versionBumps[1])
+        } else {
+          $commits.Count
+        }
+
+        if ($startIndex -lt $endIndex) {
+          $rangeCommits = $commits[($startIndex + 1)..($endIndex - 1)]
+        } else {
+          $rangeCommits = $commits[($endIndex + 1)..($startIndex - 1)]
+        }
 
         $entries = @{}
         $seenMessages = @{}
@@ -105,16 +102,18 @@ runs:
             $pattern = "^$keyword\s*:\s*(.+)$"
             if ($commit.Message -match $pattern) {
               $clean = $matches[1].Trim()
-              if ($seenMessages.ContainsKey($clean)) {
-                continue
+              if (-not $seenMessages.ContainsKey($clean)) {
+                $seenMessages[$clean] = $true
+
+                # Convert PR and issue references
+                $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
+                $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
+
+                if (-not $entries.ContainsKey($keyword)) {
+                  $entries[$keyword] = @()
+                }
+                $entries[$keyword] += "- $clean"
               }
-              $seenMessages[$clean] = $true
-              $clean = $clean -replace "PR #(\d+)", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
-              $clean = $clean -replace "#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
-              if (-not $entries.ContainsKey($keyword)) {
-                $entries[$keyword] = @()
-              }
-              $entries[$keyword] += "- $clean"
               break
             }
           }
@@ -125,6 +124,7 @@ runs:
           exit 1
         }
 
+        # Construct changelog block
         $newBlock = @()
         $newBlock += $versionTitle
         $newBlock += ""
@@ -138,11 +138,12 @@ runs:
           }
         }
 
+        # Ensure file directory exists
         $fileDir = Split-Path -Path $filePath -Parent
         if (-not (Test-Path $fileDir)) {
-          Write-Host "Creating directory for changelog: $fileDir"
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
+        # Write changelog block to file
         $newBlock | Set-Content -Path $filePath -Encoding UTF8
         Write-Host "Changelog written to $filePath"
