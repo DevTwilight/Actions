@@ -80,6 +80,15 @@ runs:
 
         Write-Host "Detected version bump: $version"
 
+        # Check for earlier duplicate bump with same version
+        $duplicate = $versionBumps | Where-Object {
+          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
+        }
+        if ($duplicate.Count -gt 0) {
+          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
+          exit 0
+        }
+
         # Determine commit range
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
