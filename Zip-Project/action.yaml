@@ -8,9 +8,10 @@ inputs:
   exclude:
     required: false
     description: 'Paths to exclude from the ZIP archive'
-  zip-name:
+  name:
     required: true
-    description: 'Name of the output ZIP file'
+    description: 'Base name of the output ZIP file (without .zip extension)'
+
   project:
     required: true
     description: 'Project folder name used for staging before compression'
@@ -23,8 +24,17 @@ runs:
       run: |
         $IncludePaths = "${{ inputs.include }}" -split "`n"
         $ExcludePaths = "${{ inputs.exclude }}" -split "`n"
-        $ZipName = "${{ inputs.zip-name }}"
+        $BaseName = "${{ inputs.name }}"
         $Project = "${{ inputs.project }}"
+
+        # Ensure the user did not include ".zip" in the file name.
+        if ($BaseName.ToLower().EndsWith(".zip")) {
+            Write-Error "The input for 'name' should not include the '.zip' extension. Please provide only the base file name without '.zip'."
+            exit 1
+        }
+
+        # Proceed with appending ".zip" to the file name automatically
+        $ZipName = $BaseName + ".zip"
 
         $WorkingDirectory = (Get-Location).Path
         $ZipFullPath = Join-Path $WorkingDirectory $ZipName
