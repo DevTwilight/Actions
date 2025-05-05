@@ -21,16 +21,10 @@ inputs:
     description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
     required: true
 
-outputs:
-  version:
-    description: 'The detected version from the changelog'
-    value: ${{ steps.extract-version.outputs.version }}
-
 runs:
   using: "composite"
   steps:
-    - name: Generate Changelog and Extract Version
-      id: extract-version
+    - name: Generate Changelog
       shell: pwsh
       env:
         REPO: ${{ github.repository }}
@@ -65,7 +59,7 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Match version bump commits
+        # Define changelog range
         $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
@@ -75,19 +69,6 @@ runs:
         }
 
         $currentBump = $versionBumps[0]
-        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
-        $version = $versionMatch.Value
-        echo "version=$version" >> $env:GITHUB_OUTPUT
-        Write-Host "Detected version bump: $version"
-
-        # Check for duplicate version bump
-        $duplicate = $versionBumps | Where-Object {
-          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
-        }
-        if ($duplicate.Count -gt 0) {
-          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
-          exit 0
-        }
 
         # Define commit range
         $startIndex = $commits.IndexOf($currentBump)
