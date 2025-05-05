@@ -2,9 +2,6 @@ name: Auto Changelog
 description: Generates a changelog from commit messages
 
 inputs:
-  repo:
-    description: 'Target repository (Repo B)'
-    required: true
   commit_message:
     description: 'Commit message pattern for version bumps (e.g., "Bump version to ")'
     required: true
@@ -15,7 +12,7 @@ inputs:
     description: 'Path to changelog file to write/update (e.g., Devlog.md)'
     required: true
   token:
-    description: 'GitHub token with write access to Repo B'
+    description: 'GitHub token with write access to the repository'
     required: true
   title:
     description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
@@ -29,15 +26,14 @@ runs:
       env:
         REPO: ${{ github.repository }}
       run: |
-        $sourceRepoUrl = "https://github.com/${{ github.repository }}"
-        $targetRepoUrl = "https://github.com/${{ inputs.repo }}"
+        $repoUrl = "https://github.com/${{ github.repository }}"
 
         $commitMessagePattern = "${{ inputs.commit_message }}"
         $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
-        # Parse section mapping into hashtable
+        # Parse section mappings
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
@@ -52,14 +48,14 @@ runs:
           exit 1
         }
 
-        Write-Host "Fetching commit history..."
+        Write-Information "Fetching commit history..." -InformationAction Continue
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
           $parts = $_ -split "\|", 2
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Define changelog range
+        # Detect version bumps
         $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
@@ -69,6 +65,27 @@ runs:
         }
 
         $currentBump = $versionBumps[0]
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
+        $version = $versionMatch.Value
+
+        # Detect duplicate version bumps
+        $duplicate = $versionBumps | Where-Object {
+          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
+        }
+
+        if ($duplicate.Count -gt 0) {
+          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
+          exit 0
+        }
+
+        # Prevent re-writing the same version in changelog
+        if (Test-Path $filePath) {
+          $existingContent = Get-Content -Path $filePath -Raw
+          if ($existingContent -match [regex]::Escape($versionTitle)) {
+            Write-Warning "Changelog already contains version entry '$versionTitle'. Skipping to prevent duplication."
+            exit 0
+          }
+        }
 
         # Define commit range
         $startIndex = $commits.IndexOf($currentBump)
@@ -96,8 +113,8 @@ runs:
                 $seenMessages[$clean] = $true
 
                 # Link PRs/issues
-                $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
-                $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
+                $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($repoUrl/pull/`$1)"
+                $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
 
                 if (-not $entries.ContainsKey($keyword)) {
                   $entries[$keyword] = @()
@@ -128,12 +145,12 @@ runs:
           }
         }
 
-        # Ensure file directory exists
+        # Ensure directory exists
         $fileDir = Split-Path -Path $filePath -Parent
         if (-not (Test-Path $fileDir)) {
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
-        # Write changelog block
+        # Write changelog
         $newBlock | Set-Content -Path $filePath -Encoding UTF8
-        Write-Host "Changelog written to $filePath"
+        Write-Information "Changelog written to $filePath" -InformationAction Continue
