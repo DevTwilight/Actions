@@ -1,5 +1,5 @@
-name: Auto Changelog
-description: Generates a changelog from commit messages
+name: 'Auto Changelog'
+description: 'Generates a changelog from commit messages'
 
 inputs:
   commit_message:
@@ -32,6 +32,11 @@ runs:
         $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
+
+        # Ensure the title starts with '## ' for markdown heading
+        if (-not $versionTitle.StartsWith("## ")) {
+            $versionTitle = "## $versionTitle"
+        }
 
         # Parse section mappings
         $sections = @{}
@@ -151,6 +156,6 @@ runs:
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
-        # Write changelog
-        $newBlock | Set-Content -Path $filePath -Encoding UTF8
+        # Append or create changelog file
+        Add-Content -Path $filePath -Value ($newBlock -join "`n")
         Write-Information "Changelog written to $filePath" -InformationAction Continue
