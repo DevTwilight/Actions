@@ -10,11 +10,7 @@ inputs:
     description: 'Paths to exclude from the ZIP archive'
   name:
     required: true
-    description: 'Base name of the output ZIP file (without .zip extension)'
-
-  project:
-    required: true
-    description: 'Project folder name used for staging before compression'
+    description: 'Base name of the output ZIP and temp folder (without .zip)'
 
 runs:
   using: "composite"
@@ -24,51 +20,44 @@ runs:
       run: |
         $IncludePaths = "${{ inputs.include }}" -split "`n"
         $ExcludePaths = "${{ inputs.exclude }}" -split "`n"
-        $BaseName = "${{ inputs.name }}"
-        $Project = "${{ inputs.project }}"
+        $FolderName = "${{ inputs.name }}"
 
-        # Ensure the user did not include ".zip" in the file name.
-        if ($BaseName.ToLower().EndsWith(".zip")) {
-            Write-Error "The input for 'name' should not include the '.zip' extension. Please provide only the base file name without '.zip'."
-            exit 1
+        if ($FolderName.ToLower().EndsWith(".zip")) {
+          Write-Error "'name' must not end with '.zip'. Use base name only."
+          exit 1
         }
 
-        # Proceed with appending ".zip" to the file name automatically
-        $ZipName = $BaseName + ".zip"
+        $WorkingDir = Get-Location
+        $TempPath = Join-Path $WorkingDir $FolderName
+        $ZipPath = Join-Path $WorkingDir "$FolderName.zip"
 
-        $WorkingDirectory = (Get-Location).Path
-        $ZipFullPath = Join-Path $WorkingDirectory $ZipName
-        $ProjectFullPath = Join-Path $WorkingDirectory $Project
+        Write-Information "Zipping files..."
 
-        Write-Host "Initiating ZIP creation process..."
-
-        if (Test-Path $ProjectFullPath) {
-          Remove-Item -Recurse -Force $ProjectFullPath
+        if (Test-Path $TempPath) {
+          Remove-Item -Recurse -Force $TempPath
         }
-        New-Item -Path $ProjectFullPath -ItemType Directory | Out-Null
 
-        Write-Host "Copying files to temp directory: '$Project'"
+        New-Item -Path $TempPath -ItemType Directory | Out-Null
 
         foreach ($Path in $IncludePaths) {
-            $TrimmedPath = $Path.Trim()
-            if (-not [string]::IsNullOrWhiteSpace($TrimmedPath) -and (Test-Path $TrimmedPath)) {
-                $Destination = Join-Path $ProjectFullPath (Split-Path $TrimmedPath -Leaf)
-                Copy-Item -Path $TrimmedPath -Destination $Destination -Recurse
-            }
+          $Path = $Path.Trim()
+          if ($Path -and (Test-Path $Path)) {
+            $Dest = Join-Path $TempPath (Split-Path $Path -Leaf)
+            Copy-Item -Path $Path -Destination $Dest -Recurse
+          }
         }
 
         foreach ($Path in $ExcludePaths) {
-            $TrimmedPath = $Path.Trim()
-            if (-not [string]::IsNullOrWhiteSpace($TrimmedPath)) {
-                $RelativeExcludePath = Join-Path $ProjectFullPath $TrimmedPath
-                if (Test-Path $RelativeExcludePath) {
-                    Remove-Item -Recurse -Force $RelativeExcludePath
-                }
+          $Path = $Path.Trim()
+          if ($Path) {
+            $Exclude = Join-Path $TempPath $Path
+            if (Test-Path $Exclude) {
+              Remove-Item -Recurse -Force $Exclude
             }
+          }
         }
 
-        Compress-Archive -Path $ProjectFullPath -DestinationPath $ZipFullPath -Force
+        Compress-Archive -Path $TempPath -DestinationPath $ZipPath -Force
+        Remove-Item -Recurse -Force $TempPath
 
-        Remove-Item -Recurse -Force $ProjectFullPath
-
-        Write-Host "ZIP file created successfully at '$ZipFullPath'."
+        Write-Information "ZIP created: $ZipPath"
