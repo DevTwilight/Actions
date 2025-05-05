@@ -24,12 +24,13 @@ inputs:
 outputs:
   version:
     description: 'The detected version from the changelog'
+    value: ${{ steps.extract-version.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Generate Changelog
-      id: set-version
+    - name: Generate Changelog and Extract Version
+      id: extract-version
       shell: pwsh
       env:
         REPO: ${{ github.repository }}
@@ -42,7 +43,7 @@ runs:
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
-        # Parse sections input into hashtable
+        # Parse section mapping into hashtable
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
@@ -77,10 +78,9 @@ runs:
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
         $version = $versionMatch.Value
         echo "version=$version" >> $env:GITHUB_OUTPUT
-
         Write-Host "Detected version bump: $version"
 
-        # Check for earlier duplicate bump with same version
+        # Check for duplicate version bump
         $duplicate = $versionBumps | Where-Object {
           $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
         }
@@ -89,7 +89,7 @@ runs:
           exit 0
         }
 
-        # Determine commit range
+        # Define commit range
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
           $commits.IndexOf($versionBumps[1])
@@ -97,10 +97,10 @@ runs:
           $commits.Count
         }
 
-        if ($startIndex -lt $endIndex) {
-          $rangeCommits = $commits[($startIndex + 1)..($endIndex - 1)]
+        $rangeCommits = if ($startIndex -lt $endIndex) {
+          $commits[($startIndex + 1)..($endIndex - 1)]
         } else {
-          $rangeCommits = $commits[($endIndex + 1)..($startIndex - 1)]
+          $commits[($endIndex + 1)..($startIndex - 1)]
         }
 
         $entries = @{}
@@ -114,7 +114,7 @@ runs:
               if (-not $seenMessages.ContainsKey($clean)) {
                 $seenMessages[$clean] = $true
 
-                # Convert PR and issue references
+                # Link PRs/issues
                 $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($sourceRepoUrl/pull/`$1)"
                 $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($sourceRepoUrl/issues/`$1)"
 
@@ -133,7 +133,7 @@ runs:
           exit 1
         }
 
-        # Construct changelog block
+        # Build changelog block
         $newBlock = @()
         $newBlock += $versionTitle
         $newBlock += ""
@@ -153,6 +153,6 @@ runs:
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
-        # Write changelog block to file
+        # Write changelog block
         $newBlock | Set-Content -Path $filePath -Encoding UTF8
         Write-Host "Changelog written to $filePath"
