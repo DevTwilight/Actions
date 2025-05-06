@@ -9,13 +9,13 @@ inputs:
     description: 'Mapping of commit keywords to changelog section titles (e.g., "Feat: New features")'
     required: true
   file:
-    description: 'Path to changelog file to write/update (e.g., Devlog.md)'
+    description: 'Path to changelog file to write/update (e.g., Notes/change.md)'
     required: true
   token:
     description: 'GitHub token with write access to the repository'
     required: true
   title:
-    description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
+    description: 'Title for the changelog version block (e.g., "Version 1.2.3")'
     required: true
 
 runs:
@@ -27,22 +27,20 @@ runs:
         REPO: ${{ github.repository }}
       run: |
         $repoUrl = "https://github.com/${{ github.repository }}"
-
         $commitMessagePattern = "${{ inputs.commit_message }}"
         $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
-        # Ensure the title starts with '## ' for markdown heading
         if (-not $versionTitle.StartsWith("## ")) {
             $versionTitle = "## $versionTitle"
         }
 
-        # Parse section mappings
+        # Parse the sections (e.g., "Feat: New features")
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
-          if ($_ -and ($_ -match "^.+:.+$")) {
+          if ($_ -match "^.+:.+$") {
             $key, $value = $_ -split ":", 2
             $sections[$key.Trim()] = $value.Trim()
           }
@@ -53,14 +51,14 @@ runs:
           exit 1
         }
 
-        Write-Information "Fetching commit history..." -InformationAction Continue
+        # Read commit history
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
           $parts = $_ -split "\|", 2
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Detect version bumps
+        # Find the most recent version bump
         $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
 
@@ -73,26 +71,18 @@ runs:
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
         $version = $versionMatch.Value
 
-        # Detect duplicate version bumps
-        $duplicate = $versionBumps | Where-Object {
-          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
-        }
-
-        if ($duplicate.Count -gt 0) {
-          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
-          exit 0
-        }
-
-        # Prevent re-writing the same version in changelog
+        # Check for duplicate version in changelog file
         if (Test-Path $filePath) {
           $existingContent = Get-Content -Path $filePath -Raw
-          if ($existingContent -match [regex]::Escape($versionTitle)) {
-            Write-Warning "Changelog already contains version entry '$versionTitle'. Skipping to prevent duplication."
+          $versionExists = $existingContent -match "(?m)^## .*\b$version\b"
+
+          if ($versionExists) {
+            Write-Warning "Changelog already contains version $version. Skipping."
             exit 0
           }
         }
 
-        # Define commit range
+        # Determine commit range for this version
         $startIndex = $commits.IndexOf($currentBump)
         $endIndex = if ($versionBumps.Count -ge 2) {
           $commits.IndexOf($versionBumps[1])
@@ -106,6 +96,7 @@ runs:
           $commits[($endIndex + 1)..($startIndex - 1)]
         }
 
+        # Organize commits by section
         $entries = @{}
         $seenMessages = @{}
 
@@ -116,8 +107,6 @@ runs:
               $clean = $matches[1].Trim()
               if (-not $seenMessages.ContainsKey($clean)) {
                 $seenMessages[$clean] = $true
-
-                # Link PRs/issues
                 $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($repoUrl/pull/`$1)"
                 $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
 
@@ -136,7 +125,7 @@ runs:
           exit 1
         }
 
-        # Build changelog block
+        # Build the new changelog block
         $newBlock = @()
         $newBlock += $versionTitle
         $newBlock += ""
@@ -156,6 +145,6 @@ runs:
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
-        # Append or create changelog file
+        # Append to the changelog file
         Add-Content -Path $filePath -Value ($newBlock -join "`n")
         Write-Information "Changelog written to $filePath" -InformationAction Continue
