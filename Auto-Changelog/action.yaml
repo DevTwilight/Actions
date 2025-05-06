@@ -9,13 +9,13 @@ inputs:
     description: 'Mapping of commit keywords to changelog section titles (e.g., "Feat: New features")'
     required: true
   file:
-    description: 'Path to changelog file to write/update (e.g., Notes/change.md)'
+    description: 'Path to changelog file to write/update (e.g., Devlog.md)'
     required: true
   token:
     description: 'GitHub token with write access to the repository'
     required: true
   title:
-    description: 'Title for the changelog version block (e.g., "Version 1.2.3")'
+    description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
     required: true
 
 runs:
@@ -32,87 +32,52 @@ runs:
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
+        # Ensure the title starts with '## ' for markdown heading
         if (-not $versionTitle.StartsWith("## ")) {
             $versionTitle = "## $versionTitle"
         }
 
-        # Parse the sections (e.g., "Feat: New features")
+        # Parse section mappings dynamically from the input
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
-          if ($_ -match "^.+:.+$") {
+          if ($_ -and ($_ -match "^.+:.+$")) {
             $key, $value = $_ -split ":", 2
             $sections[$key.Trim()] = $value.Trim()
           }
         }
 
-        if ($sections.Count -eq 0) {
-          Write-Error "No valid sections found in input."
-          exit 1
-        }
-
-        # Read commit history
+        Write-Information "Fetching commit history..." -InformationAction Continue
         $log = git log --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
           $parts = $_ -split "\|", 2
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Find the most recent version bump
-        $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
-        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
-
-        if ($versionBumps.Count -eq 0) {
-          Write-Warning "No version bump commits found with pattern '$commitMessagePattern'."
-          exit 1
-        }
-
-        $currentBump = $versionBumps[0]
-        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
-        $version = $versionMatch.Value
-
-        # Check for duplicate version in changelog file
-        if (Test-Path $filePath) {
-          $existingContent = Get-Content -Path $filePath -Raw
-          $versionExists = $existingContent -match "(?m)^## .*\b$version\b"
-
-          if ($versionExists) {
-            Write-Warning "Changelog already contains version $version. Skipping."
-            exit 0
-          }
-        }
-
-        # Determine commit range for this version
-        $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = if ($versionBumps.Count -ge 2) {
-          $commits.IndexOf($versionBumps[1])
-        } else {
-          $commits.Count
-        }
-
-        $rangeCommits = if ($startIndex -lt $endIndex) {
-          $commits[($startIndex + 1)..($endIndex - 1)]
-        } else {
-          $commits[($endIndex + 1)..($startIndex - 1)]
-        }
-
-        # Organize commits by section
+        # Initialize entries dynamically based on sections
         $entries = @{}
-        $seenMessages = @{}
+        foreach ($section in $sections.Keys) {
+          $entries[$section] = @()
+        }
+        
+        $processedMessages = @()
 
-        foreach ($commit in $rangeCommits) {
+        # Process commits
+        foreach ($commit in $commits) {
           foreach ($keyword in $sections.Keys) {
             $pattern = "^$keyword\s*:\s*(.+)$"
             if ($commit.Message -match $pattern) {
               $clean = $matches[1].Trim()
-              if (-not $seenMessages.ContainsKey($clean)) {
-                $seenMessages[$clean] = $true
+
+              # Check for duplicate commit messages
+              if ($processedMessages -notcontains $clean) {
+                $processedMessages += $clean
+
+                # Link PRs/issues
                 $clean = $clean -replace "(?i)\bPR #(\d+)\b", "[PR #`$1]($repoUrl/pull/`$1)"
                 $clean = $clean -replace "(?<!PR )#(\d+)", "[#`$1]($repoUrl/issues/`$1)"
 
-                if (-not $entries.ContainsKey($keyword)) {
-                  $entries[$keyword] = @()
-                }
+                # Add this message to the changelog entries
                 $entries[$keyword] += "- $clean"
               }
               break
@@ -120,21 +85,17 @@ runs:
           }
         }
 
-        if ($entries.Count -eq 0) {
-          Write-Warning "No matching commit messages found for changelog."
-          exit 1
-        }
-
-        # Build the new changelog block
+        # Build changelog block
         $newBlock = @()
         $newBlock += $versionTitle
         $newBlock += ""
 
+        # Add entries for each section
         foreach ($keyword in $sections.Keys) {
-          if ($entries.ContainsKey($keyword)) {
+          if ($entries[$keyword].Count -gt 0) {
             $newBlock += "### $($sections[$keyword])"
             $newBlock += ""
-            $newBlock += $entries[$keyword]
+            $newBlock += $entries[$keyword] -join "`n"
             $newBlock += ""
           }
         }
@@ -145,6 +106,6 @@ runs:
           New-Item -ItemType Directory -Path $fileDir | Out-Null
         }
 
-        # Append to the changelog file
+        # Append or create changelog file
         Add-Content -Path $filePath -Value ($newBlock -join "`n")
         Write-Information "Changelog written to $filePath" -InformationAction Continue
