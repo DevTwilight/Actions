@@ -54,16 +54,55 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
+        # Detect version bumps using the commit message pattern
+        $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
+        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
+
+        # If no version bump found, exit
+        if ($versionBumps.Count -eq 0) {
+          Write-Warning "No version bump commits found with pattern '$commitMessagePattern'."
+          exit 1
+        }
+
+        # If only one version bump found, treat it as the current version
+        $currentBump = $versionBumps[0]
+        $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
+        $version = $versionMatch.Value
+
+        # Prevent duplicate version bumps
+        $duplicate = $versionBumps | Where-Object {
+          $_.Message -eq "$commitMessagePattern$version" -and $_.Hash -ne $currentBump.Hash
+        }
+
+        if ($duplicate.Count -gt 0) {
+          Write-Warning "Duplicate version bump found for version $version. Skipping changelog generation."
+          exit 0
+        }
+
+        # Determine the range of commits between bumps
+        $startIndex = $commits.IndexOf($currentBump)
+        $endIndex = if ($versionBumps.Count -ge 2) {
+          $commits.IndexOf($versionBumps[1])
+        } else {
+          $commits.Count
+        }
+
+        $rangeCommits = if ($startIndex -lt $endIndex) {
+          $commits[($startIndex + 1)..($endIndex - 1)]
+        } else {
+          $commits[($endIndex + 1)..($startIndex - 1)]
+        }
+
         # Initialize entries dynamically based on sections
         $entries = @{}
         foreach ($section in $sections.Keys) {
           $entries[$section] = @()
         }
-        
+
         $processedMessages = @()
 
         # Process commits
-        foreach ($commit in $commits) {
+        foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
             $pattern = "^$keyword\s*:\s*(.+)$"
             if ($commit.Message -match $pattern) {
