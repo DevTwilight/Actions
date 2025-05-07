@@ -32,12 +32,11 @@ runs:
         $filePath = "${{ inputs.file }}"
         $versionTitle = "${{ inputs.title }}"
 
-        # Ensure title starts with '## '
         if (-not $versionTitle.StartsWith("## ")) {
             $versionTitle = "## $versionTitle"
         }
 
-        # Parse section mappings
+        # Parse sections
         $sections = @{}
         $sectionsInput -split "`n" | ForEach-Object {
           $_ = $_.Trim()
@@ -59,52 +58,53 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Find all version bump commits
-        $pattern = [regex]::Escape($commitMessagePattern) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
-        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern$" }
+        # Match version bump commits
+        $pattern = [regex]::Escape($commitMessagePattern.Trim()) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?\s*$'
+        $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern" }
 
         if ($versionBumps.Count -eq 0) {
           Write-Warning "No version bump commits found matching '$commitMessagePattern'"
-          exit 1
+          exit 0
         }
 
-        # Extract current version
         $currentBump = $versionBumps[0]
         $versionMatch = [regex]::Match($currentBump.Message, '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?')
         $version = $versionMatch.Value
 
-        # Check for duplicate version bumps in commit history
+        # Check for duplicates
         $versionDuplicates = $commits | Where-Object {
           $_.Message -eq "$commitMessagePattern $version"
         }
-
         if ($versionDuplicates.Count -gt 1) {
           Write-Warning "Duplicate version bump detected for version $version. Skipping changelog generation."
           exit 0
         }
 
-        # Determine commit range
-        $startIndex = $commits.IndexOf($currentBump)
-        $endIndex = if ($versionBumps.Count -ge 2) {
-          $commits.IndexOf($versionBumps[1])
+        # Determine commit range (FORWARD from previous bump to current bump)
+        if ($versionBumps.Count -ge 2) {
+          $previousBump = $versionBumps[1]
+          $startIndex = $commits.IndexOf($previousBump)
+          $endIndex = $commits.IndexOf($currentBump)
         } else {
-          $commits.Count
+          $startIndex = -1
+          $endIndex = $commits.IndexOf($currentBump)
         }
 
-        $rangeCommits = if ($startIndex -lt $endIndex) {
-          $commits[($startIndex + 1)..($endIndex - 1)]
-        } else {
-          $commits[($endIndex + 1)..($startIndex - 1)]
+        if ($startIndex -ge $endIndex - 1) {
+          Write-Warning "No commits found between previous and current version bumps."
+          exit 0
         }
 
-        # Initialize entries
+        $rangeCommits = $commits[($startIndex + 1)..($endIndex - 1)]
+        Write-Host "Found $($rangeCommits.Count) commits between version bumps."
+
+        # Organize entries
         $entries = @{}
         foreach ($section in $sections.Keys) {
           $entries[$section] = @()
         }
         $seen = @{}
 
-        # Parse matching commits
         foreach ($commit in $rangeCommits) {
           foreach ($keyword in $sections.Keys) {
             if ($commit.Message -match "^$keyword\s*:\s*(.+)$") {
@@ -120,12 +120,13 @@ runs:
           }
         }
 
-        if (($entries.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum -eq 0) {
-          Write-Warning "No matching commit messages found for changelog."
-          exit 1
+        $totalEntries = ($entries.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
+        if ($totalEntries -eq 0) {
+          Write-Warning "No changelog entries matched section keywords between version bumps."
+          exit 0
         }
 
-        # Prepare changelog block
+        # Build changelog block
         $block = @()
         $block += $versionTitle
         $block += ""
@@ -145,6 +146,6 @@ runs:
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
 
-        # Append changelog block
+        # Append changelog
         Add-Content -Path $filePath -Value ($block -join "`n")
         Write-Information "Changelog updated in $filePath" -InformationAction Continue
