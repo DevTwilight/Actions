@@ -105,9 +105,10 @@ runs:
                 if ($commit.Message -match "^$keyword\s*:\s*(.+)$") {
                     $msg = $matches[1].Trim()
                     if ($msg) {
-                        # Fix PR link regex
+                        # Fix PR link
                         $msg = $msg -replace "(?i)\bPR #(\d+)\b", "[PR #$1]($repoUrl/pull/$1)"
-                        $msg = $msg -replace "(?<!\\[)#(\d+)", "[#$1]($repoUrl/issues/$1)"
+                        # Fix issue link
+                        $msg = $msg -replace "(?i)#(\d+)\b", "[$1]($repoUrl/issues/$1)"
                         $entries[$keyword] += "- $msg"
                         $seenHashes[$commit.Hash] = $true
                     }
