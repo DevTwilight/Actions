@@ -1,5 +1,5 @@
 name: 'Auto Changelog'
-description: 'Generates a changelog from commit messages'
+description: 'Generates a changelog from commit messages for the current version bump'
 
 inputs:
   commit_message:
@@ -58,7 +58,7 @@ runs:
           [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1] }
         }
 
-        # Match version bump commits
+        # Find the most recent version bump commit
         $pattern = [regex]::Escape($commitMessagePattern.Trim()) + '\s*\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?\s*$'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$pattern" }
 
@@ -80,23 +80,9 @@ runs:
           exit 0
         }
 
-        # Determine commit range (FORWARD from previous bump to current bump)
-        if ($versionBumps.Count -ge 2) {
-          $previousBump = $versionBumps[1]
-          $startIndex = $commits.IndexOf($previousBump)
-          $endIndex = $commits.IndexOf($currentBump)
-        } else {
-          $startIndex = -1
-          $endIndex = $commits.IndexOf($currentBump)
-        }
-
-        if ($startIndex -ge $endIndex - 1) {
-          Write-Warning "No commits found between previous and current version bumps."
-          exit 0
-        }
-
-        $rangeCommits = $commits[($startIndex + 1)..($endIndex - 1)]
-        Write-Host "Found $($rangeCommits.Count) commits between version bumps."
+        # Collect commits AFTER the current version bump
+        $startIndex = $commits.IndexOf($currentBump)
+        $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
 
         # Organize entries
         $entries = @{}
@@ -122,7 +108,7 @@ runs:
 
         $totalEntries = ($entries.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum
         if ($totalEntries -eq 0) {
-          Write-Warning "No changelog entries matched section keywords between version bumps."
+          Write-Warning "No changelog entries matched section keywords after version bump."
           exit 0
         }
 
