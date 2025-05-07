@@ -51,8 +51,8 @@ runs:
             exit 1
         }
 
-        # Get commit history
-        $log = git log --pretty=format:"%H|%s"
+        # Get commit history in chronological order (oldest -> newest)
+        $log = git log --reverse --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1].Trim() }
@@ -68,7 +68,7 @@ runs:
             exit 0
         }
 
-        # Use the most recent version bump
+        # Use the most recent bump (last in reversed list)
         $currentBump = $versionBumps[-1]
         $version = ([regex]::Match($currentBump.Message, $versionRegex)).Value
 
@@ -83,7 +83,7 @@ runs:
             exit 0
         }
 
-        # Filter commits after the current bump
+        # Collect commits after the version bump
         $startIndex = $commits.IndexOf($currentBump)
         if ($startIndex -ge ($commits.Count - 1)) {
             Write-Warning "No commits found after version bump."
@@ -92,25 +92,24 @@ runs:
 
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
 
-        # Collect and organize entries
+        # Organize commit messages
         $entries = @{}
-        $seenHashes = @{}
+        $seenMessages = @{}
         foreach ($section in $sections.Keys) {
             $entries[$section] = @()
         }
 
         foreach ($commit in $rangeCommits) {
-            if ($seenHashes.ContainsKey($commit.Hash)) { continue }
             foreach ($keyword in $sections.Keys) {
                 if ($commit.Message -match "^$keyword\s*:\s*(.+)$") {
                     $msg = $matches[1].Trim()
-                    if ($msg) {
-                        # Fix PR link
+                    if (-not $seenMessages.ContainsKey($msg)) {
+                        $seenMessages[$msg] = $true
+                        # Link PRs
                         $msg = $msg -replace "(?i)\bPR #(\d+)\b", "[PR #$1]($repoUrl/pull/$1)"
-                        # Fix issue link
-                        $msg = $msg -replace "(?i)#(\d+)\b", "[$1]($repoUrl/issues/$1)"
+                        # Link issues
+                        $msg = $msg -replace "(?i)#(\d+)\b", "[#$1]($repoUrl/issues/$1)"
                         $entries[$keyword] += "- $msg"
-                        $seenHashes[$commit.Hash] = $true
                     }
                     break
                 }
