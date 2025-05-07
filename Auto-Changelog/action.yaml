@@ -15,7 +15,7 @@ inputs:
     description: 'GitHub token with write access to the repository'
     required: true
   title:
-    description: 'Title for the changelog version block (e.g., "## Version 1.2.3")'
+    description: 'Title prefix for the changelog version block (e.g., "Test Action")'
     required: true
 
 runs:
@@ -30,11 +30,7 @@ runs:
         $commitMessagePattern = "${{ inputs.commit_message }}"
         $sectionsInput = "${{ inputs.sections }}"
         $filePath = "${{ inputs.file }}"
-        $versionTitle = "${{ inputs.title }}"
-
-        if (-not $versionTitle.StartsWith("## ")) {
-            $versionTitle = "## $versionTitle"
-        }
+        $titlePrefix = "${{ inputs.title }}".Trim()
 
         # Parse sections
         $sections = @{}
@@ -51,14 +47,14 @@ runs:
             exit 1
         }
 
-        # Get commit history in chronological order (oldest -> newest)
+        # Get commits in chronological order
         $log = git log --reverse --pretty=format:"%H|%s"
         $commits = $log -split "`n" | ForEach-Object {
             $parts = $_ -split "\|", 2
             [PSCustomObject]@{ Hash = $parts[0]; Message = $parts[1].Trim() }
         }
 
-        # Find version bump commits
+        # Extract version bump
         $versionRegex = '\d+\.\d+(?:\.\d+)?(?:-[\w\d]+)?'
         $bumpPattern = [regex]::Escape($commitMessagePattern.Trim()) + '\s*' + $versionRegex + '\s*$'
         $versionBumps = $commits | Where-Object { $_.Message -match "^$bumpPattern" }
@@ -68,22 +64,34 @@ runs:
             exit 0
         }
 
-        # Use the most recent bump (last in reversed list)
+        # Use the most recent version bump
         $currentBump = $versionBumps[-1]
         $version = ([regex]::Match($currentBump.Message, $versionRegex)).Value
 
-        # Detect duplicate version bumps
-        $allVersions = $commits | ForEach-Object {
-            $match = [regex]::Match($_.Message, $versionRegex)
-            if ($match.Success) { $match.Value } else { $null }
-        } | Where-Object { $_ -eq $version }
+        # Check for previous bumps of the same version (exclude the current one)
+        $duplicateBumps = $versionBumps | Where-Object {
+            $_.Hash -ne $currentBump.Hash -and
+            ([regex]::Match($_.Message, $versionRegex)).Value -eq $version
+        }
 
-        if ($allVersions.Count -gt 1) {
-            Write-Warning "Duplicate version bump detected for version $version. Skipping changelog generation."
+        if ($duplicateBumps.Count -gt 0) {
+            Write-Warning "Version $version has already been bumped before. Skipping changelog."
             exit 0
         }
 
-        # Collect commits after the version bump
+        # Build changelog title
+        $versionTitle = "## $titlePrefix $version"
+
+        # Check if changelog file already contains this title
+        if (Test-Path $filePath) {
+            $changelogContent = Get-Content $filePath
+            if ($changelogContent | Where-Object { $_ -eq $versionTitle }) {
+                Write-Warning "Changelog for version $version already exists in file. Skipping."
+                exit 0
+            }
+        }
+
+        # Get commits after current bump
         $startIndex = $commits.IndexOf($currentBump)
         if ($startIndex -ge ($commits.Count - 1)) {
             Write-Warning "No commits found after version bump."
@@ -92,9 +100,9 @@ runs:
 
         $rangeCommits = $commits[($startIndex + 1)..($commits.Count - 1)]
 
-        # Organize commit messages
+        # Group entries by section
         $entries = @{}
-        $seenMessages = @{}
+        $seen = @{}
         foreach ($section in $sections.Keys) {
             $entries[$section] = @()
         }
@@ -103,12 +111,10 @@ runs:
             foreach ($keyword in $sections.Keys) {
                 if ($commit.Message -match "^$keyword\s*:\s*(.+)$") {
                     $msg = $matches[1].Trim()
-                    if (-not $seenMessages.ContainsKey($msg)) {
-                        $seenMessages[$msg] = $true
-                        # Link PRs
+                    if (-not $seen.ContainsKey($msg)) {
+                        $seen[$msg] = $true
                         $msg = $msg -replace "(?i)\bPR #(\d+)\b", "[PR #$1]($repoUrl/pull/$1)"
-                        # Link issues
-                        $msg = $msg -replace "(?i)#(\d+)\b", "[#$1]($repoUrl/issues/$1)"
+                        $msg = $msg -replace "(?<!\[)#[0-9]+\b", { param($m) "[#$($m.Value.Substring(1))]($repoUrl/issues/$($m.Value.Substring(1)))" }
                         $entries[$keyword] += "- $msg"
                     }
                     break
@@ -122,7 +128,7 @@ runs:
             exit 0
         }
 
-        # Build changelog block
+        # Construct changelog block
         $block = @()
         $block += $versionTitle
         $block += ""
@@ -142,6 +148,6 @@ runs:
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
         }
 
-        # Append changelog
+        # Append to changelog
         Add-Content -Path $filePath -Value ($block -join "`n")
         Write-Information "Changelog updated in $filePath" -InformationAction Continue
