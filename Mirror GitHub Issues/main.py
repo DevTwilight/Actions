@@ -2,15 +2,23 @@ import os
 import json
 import requests
 
-GITHUB_TOKEN = os.getenv("INPUT_GITHUB_TOKEN")
-SOURCE_REPO = os.getenv("INPUT_SOURCE_REPO")
-TARGET_REPO = os.getenv("INPUT_TARGET_REPO")
-GITHUB_EVENT_PATH = os.environ.get("GITHUB_EVENT_PATH")
+# Required environment variables
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+SOURCE_REPO = os.getenv("SOURCE_REPO")
+TARGET_REPO = os.getenv("TARGET_REPO")
+DEFAULT_CLOSE_COMMENT = os.getenv("DEFAULT_CLOSE_COMMENT") or ""
+GITHUB_EVENT_PATH = os.getenv("GITHUB_EVENT_PATH")
 GITHUB_API = "https://api.github.com"
 
-print(f"GITHUB_TOKEN: {'set' if GITHUB_TOKEN else 'missing'}")
-print(f"SOURCE_REPO: {SOURCE_REPO}")
-print(f"TARGET_REPO: {TARGET_REPO}")
+# Standard headers
+HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github+json"
+}
+REACT_HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.squirrel-girl-preview+json"
+}
 
 if not GITHUB_EVENT_PATH:
     print("Missing GITHUB_EVENT_PATH.")
@@ -20,84 +28,99 @@ with open(GITHUB_EVENT_PATH, 'r') as f:
     event = json.load(f)
 
 issue = event.get("issue", {})
-issue_number = issue.get("number")
+issue_num = issue.get("number")
 issue_title = issue.get("title") or "[No title]"
 issue_body = issue.get("body") or ""
 issue_state = issue.get("state")
 
-mirror_tag = f"[Mirrored from {SOURCE_REPO}#{issue_number}]"
+event_repo = os.environ.get("GITHUB_REPOSITORY")
+mirror_tag = f"[Mirrored from https://github.com/{SOURCE_REPO}/issues/{issue_num}]"
 
-headers = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github+json"
-}
+def gh_request(method, url, headers, **kwargs):
+    resp = requests.request(method, url, headers=headers, **kwargs)
+    if resp.status_code >= 400:
+        print(f"{method} {url} failed: {resp.status_code} - {resp.text}")
+        resp.raise_for_status()
+    return resp
 
-def find_mirrored_issue():
-    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues"
-    params = {"state": "all", "per_page": 100}
-    print(f"Checking for existing mirrored issues at: {url}")
-    resp = requests.get(url, headers=headers, params=params)
-    resp.raise_for_status()
-    for i in resp.json():
-        if mirror_tag in (i.get("body") or ""):
-            print(f"Found mirrored issue: #{i['number']}")
-            return i["number"]
-    print("No mirrored issue found.")
+def find_mirror(repo, tag):
+    url = f"{GITHUB_API}/repos/{repo}/issues"
+    resp = gh_request("GET", url, HEADERS, params={"state": "all", "per_page": 100})
+    for issue in resp.json():
+        if tag in (issue.get("body") or ""):
+            return issue["number"]
     return None
 
-def create_issue():
-    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues"
-    body = f"{issue_body}\n\n---\n{mirror_tag}" if issue_body else mirror_tag
-    data = {
-        "title": issue_title,
-        "body": body
-    }
-    print("Creating issue with data:")
-    print(json.dumps(data, indent=2))
-    resp = requests.post(url, headers=headers, json=data)
-    try:
-        resp.raise_for_status()
-    except requests.exceptions.HTTPError:
-        print("Failed to create issue.")
-        print("Status Code:", resp.status_code)
-        print("Response:", resp.text)
-        raise
-    number = resp.json()["number"]
-    print(f"Issue created: #{number}")
-    return number
+def mirror_issue(repo):
+    mirror_id = find_mirror(repo, mirror_tag)
+    body = f"{issue_body}\n\n{mirror_tag}" if issue_body else mirror_tag
 
-def update_issue(mirror_issue_number):
-    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues/{mirror_issue_number}"
-    body = f"{issue_body}\n\n---\n{mirror_tag}" if issue_body else mirror_tag
-    data = {
-        "title": issue_title,
-        "body": body
-    }
-    print(f"Updating issue #{mirror_issue_number}")
-    resp = requests.patch(url, headers=headers, json=data)
-    resp.raise_for_status()
-    print(f"Issue #{mirror_issue_number} updated")
+    if not mirror_id and issue_state == "open":
+        resp = gh_request("POST", f"{GITHUB_API}/repos/{repo}/issues", HEADERS, json={
+            "title": issue_title,
+            "body": body
+        })
+        mirror_id = resp.json()["number"]
 
-def close_issue(mirror_issue_number):
-    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues/{mirror_issue_number}"
-    data = {"state": "closed"}
-    print(f"Closing issue #{mirror_issue_number}")
-    resp = requests.patch(url, headers=headers, json=data)
-    resp.raise_for_status()
-    print(f"Issue #{mirror_issue_number} closed")
+    elif mirror_id:
+        gh_request("PATCH", f"{GITHUB_API}/repos/{repo}/issues/{mirror_id}", HEADERS, json={
+            "title": issue_title,
+            "body": body
+        })
+        if issue_state == "closed":
+            if DEFAULT_CLOSE_COMMENT:
+                gh_request("POST", f"{GITHUB_API}/repos/{repo}/issues/{mirror_id}/comments", HEADERS, json={
+                    "body": DEFAULT_CLOSE_COMMENT
+                })
+            gh_request("PATCH", f"{GITHUB_API}/repos/{repo}/issues/{mirror_id}", HEADERS, json={
+                "state": "closed"
+            })
+
+    return mirror_id
+
+def mirror_comments(src_repo, dst_repo, src_issue, dst_issue):
+    src_comments = gh_request("GET", f"{GITHUB_API}/repos/{src_repo}/issues/{src_issue}/comments", HEADERS).json()
+    dst_comments = gh_request("GET", f"{GITHUB_API}/repos/{dst_repo}/issues/{dst_issue}/comments", HEADERS).json()
+    dst_bodies = [c["body"] for c in dst_comments]
+
+    for comment in src_comments:
+        tag = f"[Mirrored comment ID {comment['id']}]"
+        body = f"_@{comment['user']['login']} wrote:_\n\n{comment['body']}\n\n{tag}"
+        if tag not in dst_bodies:
+            gh_request("POST", f"{GITHUB_API}/repos/{dst_repo}/issues/{dst_issue}/comments", HEADERS, json={
+                "body": body
+            })
+
+def mirror_reactions(src_repo, dst_repo, src_type, src_id, dst_type, dst_id):
+    url_src = f"{GITHUB_API}/repos/{src_repo}/{src_type}/{src_id}/reactions"
+    reactions = gh_request("GET", url_src, REACT_HEADERS).json()
+
+    for reaction in reactions:
+        url_dst = f"{GITHUB_API}/repos/{dst_repo}/{dst_type}/{dst_id}/reactions"
+        gh_request("POST", url_dst, REACT_HEADERS, json={
+            "content": reaction["content"]
+        })
 
 def main():
-    mirrored = find_mirrored_issue()
-    if mirrored is None:
-        if issue_state == "open":
-            create_issue()
-        else:
-            print("Issue is closed and not mirrored yet.")
+    if event_repo == SOURCE_REPO:
+        mirror_id = mirror_issue(TARGET_REPO)
+        if mirror_id:
+            mirror_comments(SOURCE_REPO, TARGET_REPO, issue_num, mirror_id)
+            mirror_reactions(SOURCE_REPO, TARGET_REPO, "issues", issue_num, "issues", mirror_id)
+
+    elif event_repo == TARGET_REPO:
+        reverse_tag = f"[Mirrored from https://github.com/{TARGET_REPO}/issues/{issue_num}]"
+        source_id = find_mirror(SOURCE_REPO, reverse_tag)
+        if source_id and issue_state == "closed":
+            if DEFAULT_CLOSE_COMMENT:
+                gh_request("POST", f"{GITHUB_API}/repos/{SOURCE_REPO}/issues/{source_id}/comments", HEADERS, json={
+                    "body": DEFAULT_CLOSE_COMMENT
+                })
+            gh_request("PATCH", f"{GITHUB_API}/repos/{SOURCE_REPO}/issues/{source_id}", HEADERS, json={
+                "state": "closed"
+            })
     else:
-        if issue_state == "closed":
-            close_issue(mirrored)
-        else:
-            update_issue(mirrored)
+        print("Event is from a non-watched repo. Skipping.")
 
 if __name__ == "__main__":
     main()
