@@ -7,6 +7,8 @@ inputs:
     required: true
   target-repo:
     required: true
+  default-close-comment:
+    required: false
 
 runs:
   using: composite
@@ -16,7 +18,7 @@ runs:
       with:
         python-version: '3.x'
 
-    - name: Install requests
+    - name: Install dependencies
       run: python -m pip install requests
       shell: pwsh
 
@@ -24,6 +26,7 @@ runs:
       run: python "${{ github.action_path }}\main.py"
       shell: pwsh
       env:
-        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
-        INPUT_SOURCE_REPO: ${{ inputs.source-repo }}
-        INPUT_TARGET_REPO: ${{ inputs.target-repo }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SOURCE_REPO: ${{ inputs.source-repo }}
+        TARGET_REPO: ${{ inputs.target-repo }}
+        DEFAULT_CLOSE_COMMENT: ${{ inputs.default-close-comment }}
