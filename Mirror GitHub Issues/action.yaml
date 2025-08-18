@@ -23,3 +23,7 @@ runs:
     - name: Run main.py
       run: python "${{ github.action_path }}\main.py"
       shell: pwsh
+      env:
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_SOURCE_REPO: ${{ inputs.source-repo }}
+        INPUT_TARGET_REPO: ${{ inputs.target-repo }}
