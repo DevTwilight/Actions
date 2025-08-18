@@ -2,33 +2,38 @@ import os
 import json
 import requests
 
-# Correct environment variable names (underscores, not dashes)
+# Load environment variables passed from the action
 GITHUB_TOKEN = os.getenv("INPUT_GITHUB_TOKEN")
 SOURCE_REPO = os.getenv("INPUT_SOURCE_REPO")
 TARGET_REPO = os.getenv("INPUT_TARGET_REPO")
-GITHUB_EVENT_PATH = os.environ.get("GITHUB_EVENT_PATH")
+GITHUB_EVENT_PATH = os.getenv("GITHUB_EVENT_PATH")
 GITHUB_API = "https://api.github.com"
 
-# Debug prints to verify inputs
+# Debug output
 print(f"GITHUB_TOKEN: {'set' if GITHUB_TOKEN else 'missing'}")
 print(f"SOURCE_REPO: {SOURCE_REPO}")
 print(f"TARGET_REPO: {TARGET_REPO}")
 
+# Check for required env
 if not GITHUB_EVENT_PATH:
     print("Missing GITHUB_EVENT_PATH.")
     exit(1)
 
+# Load GitHub event payload
 with open(GITHUB_EVENT_PATH, 'r') as f:
     event = json.load(f)
 
+# Get issue details
 issue = event.get("issue", {})
 issue_number = issue.get("number")
 issue_title = issue.get("title")
 issue_body = issue.get("body", "")
-issue_state = issue.get("state")
+issue_action = event.get("action")  # <- CORRECT field to use
 
+# Mirror tag to identify related issues
 mirror_tag = f"[Mirrored from {SOURCE_REPO}#{issue_number}]"
 
+# HTTP headers
 headers = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github+json"
@@ -52,8 +57,9 @@ def create_issue():
     }
     resp = requests.post(url, headers=headers, json=data)
     resp.raise_for_status()
-    print(f"Issue created in {TARGET_REPO}")
-    return resp.json()["number"]
+    issue_number = resp.json()["number"]
+    print(f"Issue #{issue_number} created in {TARGET_REPO}")
+    return issue_number
 
 def update_issue(mirror_issue_number):
     url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues/{mirror_issue_number}"
@@ -74,13 +80,13 @@ def close_issue(mirror_issue_number):
 
 def main():
     mirrored = find_mirrored_issue()
+
     if mirrored is None:
-        if issue_state == "open":
-            create_issue()
-        else:
-            print("Issue is closed and not mirrored yet.")
+        new_number = create_issue()
+        if issue_action == "closed":
+            close_issue(new_number)
     else:
-        if issue_state == "closed":
+        if issue_action == "closed":
             close_issue(mirrored)
         else:
             update_issue(mirrored)
