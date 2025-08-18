@@ -2,11 +2,17 @@ import os
 import json
 import requests
 
-GITHUB_TOKEN = os.getenv("INPUT_GITHUB-TOKEN")
-SOURCE_REPO = os.getenv("INPUT_SOURCE-REPO")
-TARGET_REPO = os.getenv("INPUT_TARGET-REPO")
+# Correct environment variable names (underscores, not dashes)
+GITHUB_TOKEN = os.getenv("INPUT_GITHUB_TOKEN")
+SOURCE_REPO = os.getenv("INPUT_SOURCE_REPO")
+TARGET_REPO = os.getenv("INPUT_TARGET_REPO")
 GITHUB_EVENT_PATH = os.environ.get("GITHUB_EVENT_PATH")
 GITHUB_API = "https://api.github.com"
+
+# Debug prints to verify inputs
+print(f"GITHUB_TOKEN: {'set' if GITHUB_TOKEN else 'missing'}")
+print(f"SOURCE_REPO: {SOURCE_REPO}")
+print(f"TARGET_REPO: {TARGET_REPO}")
 
 if not GITHUB_EVENT_PATH:
     print("Missing GITHUB_EVENT_PATH.")
