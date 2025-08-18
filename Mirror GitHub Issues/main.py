@@ -1,0 +1,83 @@
+import os
+import json
+import requests
+
+GITHUB_TOKEN = os.getenv("INPUT_GITHUB-TOKEN")
+SOURCE_REPO = os.getenv("INPUT_SOURCE-REPO")
+TARGET_REPO = os.getenv("INPUT_TARGET-REPO")
+GITHUB_EVENT_PATH = os.environ.get("GITHUB_EVENT_PATH")
+GITHUB_API = "https://api.github.com"
+
+if not GITHUB_EVENT_PATH:
+    print("Missing GITHUB_EVENT_PATH.")
+    exit(1)
+
+with open(GITHUB_EVENT_PATH, 'r') as f:
+    event = json.load(f)
+
+issue = event.get("issue", {})
+issue_number = issue.get("number")
+issue_title = issue.get("title")
+issue_body = issue.get("body", "")
+issue_state = issue.get("state")
+
+mirror_tag = f"[Mirrored from {SOURCE_REPO}#{issue_number}]"
+
+headers = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github+json"
+}
+
+def find_mirrored_issue():
+    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues"
+    params = {"state": "all", "per_page": 100}
+    resp = requests.get(url, headers=headers, params=params)
+    resp.raise_for_status()
+    for i in resp.json():
+        if mirror_tag in (i.get("body") or ""):
+            return i["number"]
+    return None
+
+def create_issue():
+    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues"
+    data = {
+        "title": issue_title,
+        "body": f"{issue_body}\n\n---\n{mirror_tag}"
+    }
+    resp = requests.post(url, headers=headers, json=data)
+    resp.raise_for_status()
+    print(f"Issue created in {TARGET_REPO}")
+    return resp.json()["number"]
+
+def update_issue(mirror_issue_number):
+    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues/{mirror_issue_number}"
+    data = {
+        "title": issue_title,
+        "body": f"{issue_body}\n\n---\n{mirror_tag}"
+    }
+    resp = requests.patch(url, headers=headers, json=data)
+    resp.raise_for_status()
+    print(f"Issue #{mirror_issue_number} updated in {TARGET_REPO}")
+
+def close_issue(mirror_issue_number):
+    url = f"{GITHUB_API}/repos/{TARGET_REPO}/issues/{mirror_issue_number}"
+    data = {"state": "closed"}
+    resp = requests.patch(url, headers=headers, json=data)
+    resp.raise_for_status()
+    print(f"Issue #{mirror_issue_number} closed in {TARGET_REPO}")
+
+def main():
+    mirrored = find_mirrored_issue()
+    if mirrored is None:
+        if issue_state == "open":
+            create_issue()
+        else:
+            print("Issue is closed and not mirrored yet.")
+    else:
+        if issue_state == "closed":
+            close_issue(mirrored)
+        else:
+            update_issue(mirrored)
+
+if __name__ == "__main__":
+    main()

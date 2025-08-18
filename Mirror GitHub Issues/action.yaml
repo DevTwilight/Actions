@@ -1,0 +1,24 @@
+name: 'Mirror GitHub Issues'
+
+inputs:
+  github-token:
+    required: true
+  source-repo:
+    required: true
+  target-repo:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install requests
+      run: python -m pip install requests
+
+    - name: Run main.py
+      run: python main.py
+      shell: bash
