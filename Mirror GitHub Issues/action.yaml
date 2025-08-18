@@ -12,7 +12,7 @@ runs:
   using: composite
   steps:
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5.6.0
       with:
         python-version: '3.x'
 
