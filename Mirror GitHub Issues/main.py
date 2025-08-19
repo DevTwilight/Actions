@@ -27,14 +27,17 @@ if not GITHUB_EVENT_PATH:
 with open(GITHUB_EVENT_PATH, 'r') as f:
     event = json.load(f)
 
+event_repo = os.environ.get("GITHUB_REPOSITORY")
+
 issue = event.get("issue", {})
 issue_num = issue.get("number")
 issue_title = issue.get("title") or "[No title]"
 issue_body = issue.get("body") or ""
 issue_state = issue.get("state")
+comment = event.get("comment")
+reaction = event.get("reaction")
 
-event_repo = os.environ.get("GITHUB_REPOSITORY")
-mirror_tag = f"[Mirrored from https://github.com/{SOURCE_REPO}/issues/{issue_num}]"
+mirror_tag = f"[Mirrored from original issue](https://github.com/{SOURCE_REPO}/issues/{issue_num})"
 
 def gh_request(method, url, headers, **kwargs):
     resp = requests.request(method, url, headers=headers, **kwargs)
@@ -84,7 +87,7 @@ def mirror_comments(src_repo, dst_repo, src_issue, dst_issue):
     dst_bodies = [c["body"] for c in dst_comments]
 
     for comment in src_comments:
-        tag = f"[Mirrored comment ID {comment['id']}]"
+        tag = f"[Mirrored from comment](https://github.com/{src_repo}/issues/{src_issue}#issuecomment-{comment['id']})"
         body = f"_@{comment['user']['login']} wrote:_\n\n{comment['body']}\n\n{tag}"
         if tag not in dst_bodies:
             gh_request("POST", f"{GITHUB_API}/repos/{dst_repo}/issues/{dst_issue}/comments", HEADERS, json={
@@ -97,11 +100,21 @@ def mirror_reactions(src_repo, dst_repo, src_type, src_id, dst_type, dst_id):
 
     for reaction in reactions:
         url_dst = f"{GITHUB_API}/repos/{dst_repo}/{dst_type}/{dst_id}/reactions"
-        gh_request("POST", url_dst, REACT_HEADERS, json={
-            "content": reaction["content"]
-        })
+        try:
+            gh_request("POST", url_dst, REACT_HEADERS, json={
+                "content": reaction["content"]
+            })
+        except requests.exceptions.HTTPError as e:
+            if "409" in str(e):
+                print("Duplicate reaction, skipping.")
+            else:
+                raise
 
 def main():
+    if not issue_num:
+        print("No issue found in event.")
+        return
+
     if event_repo == SOURCE_REPO:
         mirror_id = mirror_issue(TARGET_REPO)
         if mirror_id:
@@ -109,7 +122,7 @@ def main():
             mirror_reactions(SOURCE_REPO, TARGET_REPO, "issues", issue_num, "issues", mirror_id)
 
     elif event_repo == TARGET_REPO:
-        reverse_tag = f"[Mirrored from https://github.com/{TARGET_REPO}/issues/{issue_num}]"
+        reverse_tag = f"[Mirrored from original issue](https://github.com/{TARGET_REPO}/issues/{issue_num})"
         source_id = find_mirror(SOURCE_REPO, reverse_tag)
         if source_id and issue_state == "closed":
             if DEFAULT_CLOSE_COMMENT:
@@ -119,8 +132,6 @@ def main():
             gh_request("PATCH", f"{GITHUB_API}/repos/{SOURCE_REPO}/issues/{source_id}", HEADERS, json={
                 "state": "closed"
             })
-    else:
-        print("Event is from a non-watched repo. Skipping.")
 
 if __name__ == "__main__":
     main()
