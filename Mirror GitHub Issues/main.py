@@ -17,8 +17,8 @@ HEADERS = {
 if not GITHUB_EVENT_PATH:
     print("Missing GITHUB_EVENT_PATH.")
     exit(1)
-
-with open(GITHUB_EVENT_PATH, 'r') as f:
+    
+    with open(GITHUB_EVENT_PATH, 'r', encoding='utf-8') as f:
     event = json.load(f)
 
 event_repo = os.environ.get("GITHUB_REPOSITORY")
