@@ -5,7 +5,7 @@ import requests
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 SOURCE_REPO = os.getenv("SOURCE_REPO")
 TARGET_REPO = os.getenv("TARGET_REPO")
-DEFAULT_CLOSE_COMMENT = os.getenv("DEFAULT_CLOSE_COMMENT") or ""
+DEFAULT_CLOSE_COMMENT = os.getenv("DEFAULT_CLOSE_COMMENT")
 GITHUB_EVENT_PATH = os.getenv("GITHUB_EVENT_PATH")
 GITHUB_API = "https://api.github.com"
 
@@ -96,7 +96,6 @@ def main():
         mirror_id = mirror_issue(TARGET_REPO)
         if mirror_id:
             mirror_comments(SOURCE_REPO, TARGET_REPO, issue_num, mirror_id)
-            # Reaction mirroring removed
 
     elif event_repo == TARGET_REPO:
         reverse_tag = f"[Mirrored from original issue](https://github.com/{TARGET_REPO}/issues/{issue_num})"
