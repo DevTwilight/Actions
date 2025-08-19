@@ -2,7 +2,6 @@ import os
 import json
 import requests
 
-# Required environment variables
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 SOURCE_REPO = os.getenv("SOURCE_REPO")
 TARGET_REPO = os.getenv("TARGET_REPO")
@@ -10,14 +9,9 @@ DEFAULT_CLOSE_COMMENT = os.getenv("DEFAULT_CLOSE_COMMENT") or ""
 GITHUB_EVENT_PATH = os.getenv("GITHUB_EVENT_PATH")
 GITHUB_API = "https://api.github.com"
 
-# Standard headers
 HEADERS = {
     "Authorization": f"token {GITHUB_TOKEN}",
     "Accept": "application/vnd.github+json"
-}
-REACT_HEADERS = {
-    "Authorization": f"token {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.squirrel-girl-preview+json"
 }
 
 if not GITHUB_EVENT_PATH:
@@ -35,7 +29,6 @@ issue_title = issue.get("title") or "[No title]"
 issue_body = issue.get("body") or ""
 issue_state = issue.get("state")
 comment = event.get("comment")
-reaction = event.get("reaction")
 
 mirror_tag = f"[Mirrored from original issue](https://github.com/{SOURCE_REPO}/issues/{issue_num})"
 
@@ -94,22 +87,6 @@ def mirror_comments(src_repo, dst_repo, src_issue, dst_issue):
                 "body": body
             })
 
-def mirror_reactions(src_repo, dst_repo, src_type, src_id, dst_type, dst_id):
-    url_src = f"{GITHUB_API}/repos/{src_repo}/{src_type}/{src_id}/reactions"
-    reactions = gh_request("GET", url_src, REACT_HEADERS).json()
-
-    for reaction in reactions:
-        url_dst = f"{GITHUB_API}/repos/{dst_repo}/{dst_type}/{dst_id}/reactions"
-        try:
-            gh_request("POST", url_dst, REACT_HEADERS, json={
-                "content": reaction["content"]
-            })
-        except requests.exceptions.HTTPError as e:
-            if "409" in str(e):
-                print("Duplicate reaction, skipping.")
-            else:
-                raise
-
 def main():
     if not issue_num:
         print("No issue found in event.")
@@ -119,7 +96,7 @@ def main():
         mirror_id = mirror_issue(TARGET_REPO)
         if mirror_id:
             mirror_comments(SOURCE_REPO, TARGET_REPO, issue_num, mirror_id)
-            mirror_reactions(SOURCE_REPO, TARGET_REPO, "issues", issue_num, "issues", mirror_id)
+            # Reaction mirroring removed
 
     elif event_repo == TARGET_REPO:
         reverse_tag = f"[Mirrored from original issue](https://github.com/{TARGET_REPO}/issues/{issue_num})"
