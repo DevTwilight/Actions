@@ -1,0 +1,41 @@
+name: 'Zip-Project'
+
+inputs:
+  include:
+    required: true
+  exclude:
+    required: false
+  name:
+    required: true
+  version:
+    required: true
+  platform:
+    required: true
+  arch:
+    required: true
+  output:
+    required: false
+  compress:
+    required: false
+    default: '6'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Zip-Project
+      shell: bash
+      run: python "${{ github.action_path }}/main.py"
+      env:
+        INCLUDE: ${{ inputs.include }}
+        EXCLUDE: ${{ inputs.exclude }}
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+        PLATFORM: ${{ inputs.platform }}
+        ARCH: ${{ inputs.arch }}
+        OUTPUT: ${{ inputs.output }}
+        COMPRESS: ${{ inputs.compress }}
