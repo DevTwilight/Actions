@@ -8,15 +8,11 @@ BOLD = '\033[1m'
 
 BRIGHT_RED = '\033[91m'
 BRIGHT_GREEN = '\033[92m'
-BRIGHT_YELLOW = '\033[33m'
 BRIGHT_CYAN = '\033[96m'
 
 def print_error(msg):
     print(f"{BRIGHT_RED}{BOLD}ERROR: {msg}{RESET}", file=sys.stderr)
     sys.exit(1)
-
-def print_warning(msg):
-    print(f"{BRIGHT_YELLOW}Warning: {msg}{RESET}", file=sys.stderr)
 
 def print_success(msg):
     print(f"{BRIGHT_GREEN}{BOLD}{msg}{RESET}")
@@ -45,9 +41,7 @@ def get_latest_successful_run(repo, token, workflow, branch):
 
     runs = r.json().get("workflow_runs", [])
     if not runs:
-        print_warning(f"No successful runs found for {workflow} on branch {branch}")
-        return None
-
+        print_error(f"No successful runs found for {workflow} on branch {branch}")
     return runs[0]["id"]
 
 def list_artifacts(repo, token, run_id):
@@ -87,20 +81,31 @@ def main():
     branch = os.getenv("branch", "main")
     output_dir = os.getenv("output", "artifacts")
 
+    downloaded_any = False
+    no_artifacts_found = True
+
     for workflow in workflows:
         print_info(f"Checking workflow: {workflow}")
         run_id = get_latest_successful_run(repo, token, workflow, branch)
-        if not run_id:
-            continue
 
         artifacts = list_artifacts(repo, token, run_id)
+        if not artifacts:
+            print_info(f"No artifacts found for workflow {workflow} run {run_id}")
+            continue
+
         for artifact in artifacts:
             name = artifact["name"]
             if any(matches_pattern(name, pat) for pat in artifact_patterns):
                 print_info(f"Downloading: {name}")
                 download_artifact(repo, token, artifact, output_dir)
+                downloaded_any = True
+                no_artifacts_found = False
 
-    print_success("All matching artifacts downloaded.")
+    if downloaded_any:
+        print_success("All matching artifacts downloaded.")
+    else:
+        print_info("No artifacts found matching the given patterns.")
+        sys.exit(1) 
 
 if __name__ == "__main__":
     main()
