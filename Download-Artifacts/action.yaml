@@ -1,0 +1,35 @@
+name: 'Download Artifacts'
+
+inputs:
+  workflows:
+    required: true
+
+  artifacts:
+    required: true
+
+  branch:
+    required: false
+    default: main
+
+  output:
+    required: false
+    default: artifacts
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - run: pip install requests
+      shell: bash
+
+    - run: python "${{ github.action_path }}/main.py"
+      shell: bash
+      env:
+        workflows: ${{ inputs.workflows }}
+        artifacts: ${{ inputs.artifacts }}
+        branch: ${{ inputs.branch }}
+        output: ${{ inputs.output }}
+        GITHUB_TOKEN: ${{ github.token }}
