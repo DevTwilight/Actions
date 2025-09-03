@@ -17,7 +17,7 @@ inputs:
     required: false
   compress:
     required: false
-    default: '6'
+    default: '6' 
 
 runs:
   using: composite

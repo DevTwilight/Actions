@@ -9,22 +9,22 @@ RESET = '\033[0m'
 BOLD = '\033[1m'
 
 BRIGHT_RED = '\033[91m'
-BRIGHT_GREEN = '\033[38;5;10m'
-VIVID_YELLOW = '\033[38;5;226m'
-LIGHT_CORNFLOWER_BLUE = "\033[38;2;175;203;255m"
+BRIGHT_GREEN = '\033[92m'
+BRIGHT_YELLOW = '\033[33m'
+BRIGHT_CYAN = '\033[96m'
 
 def print_error(msg):
     print(f"{BRIGHT_RED}{BOLD}ERROR: {msg}{RESET}", file=sys.stderr)
     sys.exit(1)
 
 def print_warning(msg):
-    print(f"{VIVID_YELLOW}Warning: {msg}{RESET}", file=sys.stderr)
+    print(f"{BRIGHT_YELLOW}Warning: {msg}{RESET}", file=sys.stderr)
 
 def print_success(msg):
     print(f"{BRIGHT_GREEN}{BOLD}{msg}{RESET}")
 
 def print_info(msg):
-    print(f"{LIGHT_CORNFLOWER_BLUE}{msg}{RESET}")
+    print(f"{BRIGHT_CYAN}{msg}{RESET}")
 
 def get_env_var(name, required=False, default=None):
     val = os.getenv(name)
@@ -75,7 +75,7 @@ def create_zip(zip_path, source_dir, compress_level):
                 root_path = Path(root)
                 for file in files:
                     file_path = root_path / file
-                    arcname = file_path.relative_to(source_dir)
+                    arcname = Path(source_dir).name / file_path.relative_to(source_dir)
                     zipf.write(file_path, arcname)
     except TypeError:
         if compress_level > 0:
@@ -85,7 +85,7 @@ def create_zip(zip_path, source_dir, compress_level):
                 root_path = Path(root)
                 for file in files:
                     file_path = root_path / file
-                    arcname = file_path.relative_to(source_dir)
+                    arcname = Path(source_dir).name / file_path.relative_to(source_dir)  
                     zipf.write(file_path, arcname)
 
 def main():
@@ -99,10 +99,10 @@ def main():
     platform = get_env_var("PLATFORM", required=True)
     arch = get_env_var("ARCH", required=True)
     output_dir = get_env_var("OUTPUT", default=os.getcwd())
-    compress_str = get_env_var("COMPRESS", default="6")
+    compress_str = get_env_var("COMPRESS")
 
     try:
-        compress_level = int(compress_str)
+        compress_level = int(compress_str) if compress_str is not None else 6
         if compress_level < 0 or compress_level > 9:
             raise ValueError()
     except ValueError:
@@ -116,21 +116,27 @@ def main():
         except Exception as e:
             print_error(f"Failed to create output directory '{output_path}': {e}")
 
-    zip_name = f"{name}-{version}-{platform}-{arch}.zip"
-    zip_path = output_path / zip_name
+    folder_name = f"{name}-{version}-{platform}-{arch}"
+    folder_path = output_path / folder_name
+    if folder_path.exists():
+        shutil.rmtree(folder_path)
 
-    print_info(f"Creating ZIP archive: {zip_path}")
-    print_info(f"Including paths: {includes}")
+    print_info(f"Copying includes into folder: {folder_path}")
+    folder_path.mkdir(parents=True, exist_ok=True)
+
+    copy_includes(includes, folder_path)
+
     if excludes:
-        print_info(f"Excluding paths: {excludes}")
+        print_info(f"Removing excluded paths: {excludes}")
+        remove_excludes(excludes, folder_path)
     else:
         print_info("No paths to exclude.")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        copy_includes(includes, temp_dir)
-        if excludes:
-            remove_excludes(excludes, temp_dir)
-        create_zip(zip_path, temp_dir, compress_level)
+    zip_name = f"{folder_name}.zip"
+    zip_path = output_path / zip_name
+
+    print_info(f"Creating ZIP archive: {zip_path}")
+    create_zip(zip_path, folder_path, compress_level)
 
     print_success(f"ZIP archive created successfully: {zip_path}")
 

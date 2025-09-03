@@ -1,0 +1,30 @@
+name: 'Create Release'
+
+inputs:
+  tag:
+    required: true
+  title:
+    required: true
+  assets:
+    required: true
+  draft:
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Run release script
+      shell: bash
+      run: python "${{ github.action_path }}/main.py"
+      env:
+        TAG: ${{ inputs.tag }}
+        REPO: ${{ github.repository }}
+        TITLE: ${{ inputs.title }}
+        ASSETS: ${{ inputs.assets }}
+        DRAFT: ${{ inputs.draft }}
