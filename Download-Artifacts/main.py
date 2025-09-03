@@ -3,6 +3,7 @@ import sys
 import requests
 import fnmatch
 
+# ANSI styles
 RESET = '\033[0m'
 BOLD = '\033[1m'
 
@@ -41,7 +42,9 @@ def get_latest_successful_run(repo, token, workflow, branch):
 
     runs = r.json().get("workflow_runs", [])
     if not runs:
-        print_error(f"No successful runs found for {workflow} on branch {branch}")
+        print_info(f"No successful runs found for {workflow} on branch {branch}")
+        sys.exit(0)
+
     return runs[0]["id"]
 
 def list_artifacts(repo, token, run_id):
@@ -81,31 +84,33 @@ def main():
     branch = os.getenv("branch", "main")
     output_dir = os.getenv("output", "artifacts")
 
-    downloaded_any = False
-    no_artifacts_found = True
+    any_downloaded = False
 
     for workflow in workflows:
         print_info(f"Checking workflow: {workflow}")
         run_id = get_latest_successful_run(repo, token, workflow, branch)
+        if not run_id:
+            continue
 
         artifacts = list_artifacts(repo, token, run_id)
         if not artifacts:
             print_info(f"No artifacts found for workflow {workflow} run {run_id}")
             continue
 
+        matched = False
         for artifact in artifacts:
             name = artifact["name"]
             if any(matches_pattern(name, pat) for pat in artifact_patterns):
                 print_info(f"Downloading: {name}")
                 download_artifact(repo, token, artifact, output_dir)
-                downloaded_any = True
-                no_artifacts_found = False
+                any_downloaded = True
+                matched = True
 
-    if downloaded_any:
-        print_success("All matching artifacts downloaded.")
-    else:
-        print_info("No artifacts found matching the given patterns.")
-        sys.exit(1) 
+        if not matched:
+            print_info("No artifacts found matching the given patterns.")
+
+    if not any_downloaded:
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
