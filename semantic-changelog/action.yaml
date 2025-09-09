@@ -5,7 +5,7 @@ inputs:
     required: true
   file:
     required: false
-    default: 'CHANGELOG.md'
+    default: 'Changelog.md'
   sections:
     required: true
   template:
