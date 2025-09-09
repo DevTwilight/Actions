@@ -38,6 +38,11 @@ def main():
     if not repo:
         logger.print_error("GITHUB_REPOSITORY environment variable is required.")
 
+    if not os.path.isabs(template_path):
+        action_dir = os.getenv('GITHUB_ACTION_PATH', '')
+        if action_dir:
+            template_path = os.path.join(action_dir, template_path)
+
     sections = parse_sections(sections_raw)
 
     if not tag:
