@@ -66,13 +66,19 @@ def generate_changelog(commits, sections, template_path, tag, date, repo, token)
     if total == 0:
         logger.print_warning("No changelog entries matched section prefixes.")
         return ""
+
     lines = []
-    lines.append(f"# {tag} - {date}")
-    lines.append("")
+
     for prefix, title in sections.items():
         if entries[prefix]:
-            details = "\n- ".join(entries[prefix])
-            section_text = template.replace("{{CATEGORY}}", title).replace("{{DETAIL}}", "- " + details)
+            details = "\n".join(f"- {entry}" for entry in entries[prefix])
+            section_text = (
+                template
+                .replace("{{VERSION}}", tag)
+                .replace("{{DATE}}", date)
+                .replace("{{CATEGORY}}", title)
+                .replace("{{DETAIL}}", details)
+            )
             section_lines = section_text.splitlines()
             if section_lines and section_lines[0].startswith("# "):
                 section_lines = section_lines[1:]
