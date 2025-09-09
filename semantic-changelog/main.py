@@ -23,10 +23,9 @@ def main():
     token = os.getenv("GITHUB_TOKEN")
     file_path = os.getenv("CHANGELOG_FILE")
     sections_raw = os.getenv("SECTIONS")
-    template_path_input = os.getenv("TEMPLATE_FILE")
+    template_path = os.getenv("TEMPLATE_FILE")
     tag = os.getenv("TAG")
     repo = os.getenv("GITHUB_REPOSITORY")
-    action_path = os.getenv("GITHUB_ACTION_PATH") or os.getenv("GITHUB_ACTION")
 
     if not token:
         logger.print_error("GITHUB_TOKEN is required.")
@@ -34,15 +33,10 @@ def main():
         logger.print_error("SECTIONS input is required.")
     if not file_path:
         logger.print_error("CHANGELOG_FILE input is required.")
-    if not template_path_input:
+    if not template_path:
         logger.print_error("TEMPLATE_FILE input is required.")
     if not repo:
         logger.print_error("GITHUB_REPOSITORY environment variable is required.")
-
-    if action_path and template_path_input and not os.path.isabs(template_path_input):
-        template_path = os.path.join(action_path, template_path_input)
-    else:
-        template_path = template_path_input
 
     sections = parse_sections(sections_raw)
 
@@ -60,9 +54,7 @@ def main():
 
     date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
 
-    changelog_content = changelog.generate_changelog(
-        commits, sections, template_path, tag, date, repo, token
-    )
+    changelog_content = changelog.generate_changelog(commits, sections, template_path, tag, date, repo, token)
 
     if not changelog_content:
         logger.print_warning("No changelog content generated.")
