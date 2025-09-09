@@ -1,0 +1,40 @@
+name: semantic-changelog
+
+inputs:
+  token:
+    required: true
+  file:
+    required: false
+    default: 'CHANGELOG.md'
+  sections:
+    required: true
+  template:
+    required: false
+    default: 'template.md'
+  tag:
+    required: false
+
+outputs:
+  tag:
+    value: ${{ steps.generate.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Generate Changelog
+      id: generate
+      shell: bash
+      run: |
+        pip install requests
+        python "${{ github.action_path }}/main.py"
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        CHANGELOG_FILE: ${{ inputs.file }}
+        SECTIONS: ${{ inputs.sections }}
+        TEMPLATE_FILE: ${{ inputs.template }}
+        TAG: ${{ inputs.tag }}
