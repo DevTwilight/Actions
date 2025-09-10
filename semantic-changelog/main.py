@@ -35,8 +35,7 @@ def main():
             existing = f.read()
         if tag in existing:
             logger.print_warning(f"Changelog for tag {tag} already exists in {file_path}.")
-            sys.exit(0)
-
+            sys.exit(0)  
     if not os.path.isabs(template_path):
         action_dir = os.getenv('GITHUB_ACTION_PATH', '')
         if action_dir:
