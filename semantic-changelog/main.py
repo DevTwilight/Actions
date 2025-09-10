@@ -12,6 +12,7 @@ def main():
     template_path = os.getenv("TEMPLATE_FILE")
     tag = os.getenv("TAG")
     repo = os.getenv("GITHUB_REPOSITORY")
+    github_output = os.getenv("GITHUB_OUTPUT")
 
     if not token:
         logger.print_error("GITHUB_TOKEN is required.")
@@ -45,7 +46,7 @@ def main():
 
     previous_tag = git.get_previous_tag(tag)
     commits = git.get_commits(previous_tag, tag)
-    commits.reverse() 
+    commits.reverse()
     if not commits:
         logger.print_warning(f"No commits found between {previous_tag} and {tag}.")
         sys.exit(0)
@@ -53,7 +54,7 @@ def main():
     date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
 
     changelog_content = changelog.generate_changelog(commits, sections, template_path, tag, date, repo, token)
-    changelog_content = changelog_content.lstrip('\ufeff') 
+    changelog_content = changelog_content.lstrip('\ufeff')
 
     if not changelog_content:
         logger.print_warning("No changelog content generated.")
@@ -65,7 +66,12 @@ def main():
         f.write("\n")
 
     logger.print_success(f"Changelog updated in {file_path}")
-    print(f"tag={tag}", flush=True)
+
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as out_file:
+            out_file.write(f"tag={tag}\n")
+    else:
+        print(f"tag={tag}", flush=True)
 
 if __name__ == "__main__":
     main()
