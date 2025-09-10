@@ -21,7 +21,12 @@ def _get_mirrored_link(body):
     return m.group(1)
 
 def _replace_refs(text, repo, token):
-    def replacer(match):
+    def pr_replacer(match):
+        pr_num = match.group(1)
+        return f"[PR #{pr_num}](https://github.com/{repo}/pull/{pr_num})"
+    text = re.sub(r"\bPR #(\d+)\b", pr_replacer, text, flags=re.IGNORECASE)
+
+    def issue_replacer(match):
         num = match.group(1)
         body = _get_issue_body(repo, token, num)
         mirrored = _get_mirrored_link(body)
@@ -32,7 +37,9 @@ def _replace_refs(text, repo, token):
             return f"[#{mirrored_num}](https://github.com/{mirrored_repo}/issues/{mirrored_num})"
         else:
             return f"[#{num}](https://github.com/{repo}/issues/{num})"
-    return re.sub(r"#(\d+)", replacer, text)
+    text = re.sub(r"(?<!\[)#(\d+)", issue_replacer, text)
+
+    return text
 
 def parse_sections(raw):
     pairs = raw.split(",")
@@ -49,6 +56,7 @@ def generate_changelog(commits, sections, template_path, tag, date, repo, token)
     seen = set()
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
+
     for commit in commits:
         msg = commit["message"]
         for prefix in sections.keys():
@@ -62,26 +70,35 @@ def generate_changelog(commits, sections, template_path, tag, date, repo, token)
                 detail = _replace_refs(detail, repo, token)
                 entries[prefix].append(detail)
                 break
+
     total = sum(len(v) for v in entries.values())
     if total == 0:
         logger.print_warning("No changelog entries matched section prefixes.")
         return ""
 
-    lines = []
+    template_lines = template.splitlines()
+    header_line = ""
+    body_template = template
+
+    if template_lines and template_lines[0].startswith("# "):
+        header_line = template_lines[0]
+        body_template = "\n".join(template_lines[1:])
+
+    header = header_line.replace("{{VERSION}}", tag).replace("{{DATE}}", date)
+    lines = [header, ""]
 
     for prefix, title in sections.items():
         if entries[prefix]:
-            details = "\n".join(f"- {entry}" for entry in entries[prefix])
+            details = "\n".join(
+                entry if entry.lstrip().startswith("-") else f"- {entry}"
+                for entry in entries[prefix]
+            )
             section_text = (
-                template
-                .replace("{{VERSION}}", tag)
-                .replace("{{DATE}}", date)
+                body_template
                 .replace("{{CATEGORY}}", title)
                 .replace("{{DETAIL}}", details)
             )
-            section_lines = section_text.splitlines()
-            if section_lines and section_lines[0].startswith("# "):
-                section_lines = section_lines[1:]
-            lines.extend(section_lines)
+            lines.append(section_text)
             lines.append("")
+
     return "\n".join(lines).strip()
