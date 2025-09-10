@@ -2,4 +2,4 @@
 
 ## {{CATEGORY}}
 
-- {{DETAIL}}
+{{DETAILS}}
